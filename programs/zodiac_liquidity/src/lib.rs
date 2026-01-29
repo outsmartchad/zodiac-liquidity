@@ -29,6 +29,9 @@ fn token_2022_program_id() -> Pubkey {
     Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap()
 }
 
+/// Number of zodiac relay PDAs per vault (0..11)
+const NUM_RELAYS: u8 = 12;
+
 // Computation definition offsets (derived from instruction names)
 const COMP_DEF_OFFSET_INIT_VAULT: u32 = comp_def_offset("init_vault");
 const COMP_DEF_OFFSET_INIT_USER_POSITION: u32 = comp_def_offset("init_user_position");
@@ -775,25 +778,27 @@ pub mod zodiac_liquidity {
     }
 
     // ============================================================
-    // METEORA DAMM V2 CPI (Protocol PDA signs all interactions)
+    // METEORA DAMM V2 CPI (Relay PDA signs all interactions)
     // ============================================================
 
     /// Deploy aggregated liquidity to Meteora DAMM v2.
-    /// Protocol PDA signs the CPI, breaking user → LP linkability.
+    /// Relay PDA signs the CPI, breaking user → LP linkability.
     /// Called by vault authority after reveal_pending_deposits.
-    pub fn deploy_to_meteora(
-        ctx: Context<DeployToMeteora>,
+    pub fn deposit_to_meteora_damm_v2(
+        ctx: Context<DepositToMeteoraDammV2>,
+        relay_index: u8,
         liquidity_delta: u128,
         token_a_amount_threshold: u64,
         token_b_amount_threshold: u64,
         sol_amount: Option<u64>,
     ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
         require!(
             ctx.accounts.authority.key() == ctx.accounts.vault.authority,
             ErrorCode::Unauthorized
         );
 
-        msg!("Protocol PDA deploying {} liquidity to Meteora", liquidity_delta);
+        msg!("Relay PDA {} deploying {} liquidity to Meteora", relay_index, liquidity_delta);
 
         // If token_b_mint is WSOL and sol_amount is provided, wrap SOL first
         if is_native_mint(&ctx.accounts.token_b_mint.key()) {
@@ -803,7 +808,7 @@ pub mod zodiac_liquidity {
                         ctx.accounts.system_program.to_account_info(),
                         anchor_lang::system_program::Transfer {
                             from: ctx.accounts.authority.to_account_info(),
-                            to: ctx.accounts.protocol_token_b.to_account_info(),
+                            to: ctx.accounts.relay_token_b.to_account_info(),
                         },
                     ),
                     amount,
@@ -812,32 +817,33 @@ pub mod zodiac_liquidity {
                 token::sync_native(CpiContext::new(
                     ctx.accounts.token_b_program.to_account_info(),
                     token::SyncNative {
-                        account: ctx.accounts.protocol_token_b.to_account_info(),
+                        account: ctx.accounts.relay_token_b.to_account_info(),
                     },
                 ))?;
             }
         }
 
-        // Protocol PDA signs the CPI to Meteora
+        // Relay PDA signs the CPI to Meteora
         let vault_key = ctx.accounts.vault.key();
         let seeds = &[
-            b"protocol_pda",
+            b"zodiac_relay".as_ref(),
             vault_key.as_ref(),
-            &[ctx.accounts.vault.bump],
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
         ];
         let signer_seeds = &[&seeds[..]];
 
         let cpi_accounts = damm_v2::cpi::accounts::AddLiquidity {
             pool: ctx.accounts.pool.to_account_info(),
             position: ctx.accounts.position.to_account_info(),
-            token_a_account: ctx.accounts.protocol_token_a.to_account_info(),
-            token_b_account: ctx.accounts.protocol_token_b.to_account_info(),
+            token_a_account: ctx.accounts.relay_token_a.to_account_info(),
+            token_b_account: ctx.accounts.relay_token_b.to_account_info(),
             token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
             token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
             token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
             token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
             position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
-            owner: ctx.accounts.protocol_pda.to_account_info(),
+            owner: ctx.accounts.relay_pda.to_account_info(),
             token_a_program: ctx.accounts.token_a_program.to_account_info(),
             token_b_program: ctx.accounts.token_b_program.to_account_info(),
             event_authority: ctx.accounts.event_authority.to_account_info(),
@@ -859,8 +865,9 @@ pub mod zodiac_liquidity {
             },
         )?;
 
-        emit!(DeployedToMeteoraEvent {
+        emit!(DepositedToMeteoraEvent {
             vault: ctx.accounts.vault.key(),
+            relay_index,
             liquidity_delta,
         });
 
@@ -868,27 +875,30 @@ pub mod zodiac_liquidity {
     }
 
     /// Withdraw liquidity from Meteora DAMM v2.
-    /// Protocol PDA signs the CPI. Tokens go to protocol accounts
+    /// Relay PDA signs the CPI. Tokens go to relay accounts
     /// for distribution to users via MPC-computed shares.
-    pub fn withdraw_from_meteora(
-        ctx: Context<WithdrawFromMeteora>,
+    pub fn withdraw_from_meteora_damm_v2(
+        ctx: Context<WithdrawFromMeteoraDammV2>,
+        relay_index: u8,
         liquidity_delta: u128,
         token_a_amount_threshold: u64,
         token_b_amount_threshold: u64,
     ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
         require!(
             ctx.accounts.authority.key() == ctx.accounts.vault.authority,
             ErrorCode::Unauthorized
         );
 
-        msg!("Protocol PDA withdrawing {} liquidity from Meteora", liquidity_delta);
+        msg!("Relay PDA {} withdrawing {} liquidity from Meteora", relay_index, liquidity_delta);
 
-        // Protocol PDA signs the CPI to Meteora
+        // Relay PDA signs the CPI to Meteora
         let vault_key = ctx.accounts.vault.key();
         let seeds = &[
-            b"protocol_pda",
+            b"zodiac_relay".as_ref(),
             vault_key.as_ref(),
-            &[ctx.accounts.vault.bump],
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
         ];
         let signer_seeds = &[&seeds[..]];
 
@@ -896,14 +906,14 @@ pub mod zodiac_liquidity {
             pool_authority: ctx.accounts.pool_authority.to_account_info(),
             pool: ctx.accounts.pool.to_account_info(),
             position: ctx.accounts.position.to_account_info(),
-            token_a_account: ctx.accounts.protocol_token_a.to_account_info(),
-            token_b_account: ctx.accounts.protocol_token_b.to_account_info(),
+            token_a_account: ctx.accounts.relay_token_a.to_account_info(),
+            token_b_account: ctx.accounts.relay_token_b.to_account_info(),
             token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
             token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
             token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
             token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
             position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
-            owner: ctx.accounts.protocol_pda.to_account_info(),
+            owner: ctx.accounts.relay_pda.to_account_info(),
             token_a_program: ctx.accounts.token_a_program.to_account_info(),
             token_b_program: ctx.accounts.token_b_program.to_account_info(),
             event_authority: ctx.accounts.event_authority.to_account_info(),
@@ -927,39 +937,45 @@ pub mod zodiac_liquidity {
 
         emit!(WithdrawnFromMeteoraEvent {
             vault: ctx.accounts.vault.key(),
+            relay_index,
             liquidity_delta,
         });
 
         Ok(())
     }
 
-    /// Create a Meteora position for the protocol PDA.
-    /// Called once per pool to set up the protocol's position.
-    pub fn create_meteora_position(ctx: Context<CreateMeteoraPosition>) -> Result<()> {
+    /// Create a Meteora position for a relay PDA.
+    /// Called once per relay per pool to set up the relay's position.
+    pub fn create_meteora_position(
+        ctx: Context<CreateMeteoraPosition>,
+        relay_index: u8,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
         require!(
             ctx.accounts.authority.key() == ctx.accounts.vault.authority,
             ErrorCode::Unauthorized
         );
 
-        msg!("Creating Meteora position for protocol PDA");
+        msg!("Creating Meteora position for relay PDA {}", relay_index);
 
-        // Protocol PDA signs the CPI to Meteora
+        // Relay PDA signs the CPI to Meteora
         let vault_key = ctx.accounts.vault.key();
         let seeds = &[
-            b"protocol_pda",
+            b"zodiac_relay".as_ref(),
             vault_key.as_ref(),
-            &[ctx.accounts.vault.bump],
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
         ];
         let signer_seeds = &[&seeds[..]];
 
         let cpi_accounts = damm_v2::cpi::accounts::CreatePosition {
-            owner: ctx.accounts.protocol_pda.to_account_info(),
+            owner: ctx.accounts.relay_pda.to_account_info(),
             position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
             position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
             pool: ctx.accounts.pool.to_account_info(),
             position: ctx.accounts.position.to_account_info(),
             pool_authority: ctx.accounts.pool_authority.to_account_info(),
-            payer: ctx.accounts.authority.to_account_info(),
+            payer: ctx.accounts.relay_pda.to_account_info(),
             token_program: ctx.accounts.token_program.to_account_info(),
             system_program: ctx.accounts.system_program.to_account_info(),
             event_authority: ctx.accounts.event_authority.to_account_info(),
@@ -976,7 +992,121 @@ pub mod zodiac_liquidity {
 
         emit!(MeteoraPositionCreatedEvent {
             vault: ctx.accounts.vault.key(),
+            relay_index,
             pool: ctx.accounts.pool.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Create a Meteora pool via a relay PDA.
+    /// The relay PDA acts as payer for the Meteora initialize_pool CPI,
+    /// so the pool is not linked to any user wallet.
+    /// The relay PDA must be funded with SOL + tokens first (via fund_relay).
+    pub fn create_pool_via_relay(
+        ctx: Context<CreatePoolViaRelay>,
+        relay_index: u8,
+        liquidity: u128,
+        sqrt_price: u128,
+        activation_point: Option<u64>,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Relay PDA {} creating Meteora pool", relay_index);
+
+        // Relay PDA signs the CPI as payer
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::InitializePool {
+            creator: ctx.accounts.relay_pda.to_account_info(),
+            position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            payer: ctx.accounts.relay_pda.to_account_info(),
+            config: ctx.accounts.config.to_account_info(),
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            payer_token_a: ctx.accounts.relay_token_a.to_account_info(),
+            payer_token_b: ctx.accounts.relay_token_b.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            token_2022_program: ctx.accounts.token_2022_program.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::initialize_pool(
+            cpi_ctx,
+            damm_v2::types::InitializePoolParameters {
+                liquidity,
+                sqrt_price,
+                activation_point,
+            },
+        )?;
+
+        emit!(PoolCreatedViaRelayEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            pool: ctx.accounts.pool.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Fund a relay PDA's token accounts.
+    /// Transfers tokens from authority's token account to the relay PDA's token account.
+    /// Must be called before create_pool_via_relay or deposit_to_meteora_damm_v2.
+    pub fn fund_relay(
+        ctx: Context<FundRelay>,
+        relay_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Funding relay PDA {} with {} tokens", relay_index, amount);
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.authority_token_account.to_account_info(),
+                    to: ctx.accounts.relay_token_account.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        emit!(RelayFundedEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            amount,
         });
 
         Ok(())
@@ -1762,9 +1892,10 @@ pub struct ClearPositionCallback<'info> {
 // METEORA CPI ACCOUNT STRUCTURES
 // ============================================================
 
-/// Accounts for deploying liquidity to Meteora via Protocol PDA
+/// Accounts for depositing liquidity to Meteora via Relay PDA
 #[derive(Accounts)]
-pub struct DeployToMeteora<'info> {
+#[instruction(relay_index: u8)]
+pub struct DepositToMeteoraDammV2<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -1774,13 +1905,13 @@ pub struct DeployToMeteora<'info> {
     )]
     pub vault: Account<'info, VaultAccount>,
 
-    /// Protocol PDA that owns the Meteora position
-    /// CHECK: Derived from vault seeds
+    /// Relay PDA that owns the Meteora position
+    /// CHECK: Derived from vault + relay_index seeds
     #[account(
-        seeds = [b"protocol_pda", vault.key().as_ref()],
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
         bump,
     )]
-    pub protocol_pda: UncheckedAccount<'info>,
+    pub relay_pda: UncheckedAccount<'info>,
 
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
@@ -1790,15 +1921,15 @@ pub struct DeployToMeteora<'info> {
     #[account(mut)]
     pub position: UncheckedAccount<'info>,
 
-    /// Protocol's token A account (source)
+    /// Relay's token A account (source)
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
-    pub protocol_token_a: UncheckedAccount<'info>,
+    pub relay_token_a: UncheckedAccount<'info>,
 
-    /// Protocol's token B account (source)
+    /// Relay's token B account (source)
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
-    pub protocol_token_b: UncheckedAccount<'info>,
+    pub relay_token_b: UncheckedAccount<'info>,
 
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
@@ -1830,9 +1961,10 @@ pub struct DeployToMeteora<'info> {
     pub amm_program: UncheckedAccount<'info>,
 }
 
-/// Accounts for withdrawing liquidity from Meteora via Protocol PDA
+/// Accounts for withdrawing liquidity from Meteora via Relay PDA
 #[derive(Accounts)]
-pub struct WithdrawFromMeteora<'info> {
+#[instruction(relay_index: u8)]
+pub struct WithdrawFromMeteoraDammV2<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
 
@@ -1842,13 +1974,13 @@ pub struct WithdrawFromMeteora<'info> {
     )]
     pub vault: Account<'info, VaultAccount>,
 
-    /// Protocol PDA that owns the Meteora position
-    /// CHECK: Derived from vault seeds
+    /// Relay PDA that owns the Meteora position
+    /// CHECK: Derived from vault + relay_index seeds
     #[account(
-        seeds = [b"protocol_pda", vault.key().as_ref()],
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
         bump,
     )]
-    pub protocol_pda: UncheckedAccount<'info>,
+    pub relay_pda: UncheckedAccount<'info>,
 
     /// CHECK: Must match DAMM v2 pool authority
     #[account(address = damm_v2_pool_authority())]
@@ -1862,15 +1994,15 @@ pub struct WithdrawFromMeteora<'info> {
     #[account(mut)]
     pub position: UncheckedAccount<'info>,
 
-    /// Protocol's token A account (receives tokens)
+    /// Relay's token A account (receives tokens)
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
-    pub protocol_token_a: UncheckedAccount<'info>,
+    pub relay_token_a: UncheckedAccount<'info>,
 
-    /// Protocol's token B account (receives tokens)
+    /// Relay's token B account (receives tokens)
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
-    pub protocol_token_b: UncheckedAccount<'info>,
+    pub relay_token_b: UncheckedAccount<'info>,
 
     /// CHECK: Validated by DAMM v2 program
     #[account(mut)]
@@ -1901,8 +2033,9 @@ pub struct WithdrawFromMeteora<'info> {
     pub amm_program: UncheckedAccount<'info>,
 }
 
-/// Accounts for creating a Meteora position for Protocol PDA
+/// Accounts for creating a Meteora position for a Relay PDA
 #[derive(Accounts)]
+#[instruction(relay_index: u8)]
 pub struct CreateMeteoraPosition<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -1913,13 +2046,14 @@ pub struct CreateMeteoraPosition<'info> {
     )]
     pub vault: Account<'info, VaultAccount>,
 
-    /// Protocol PDA that will own the Meteora position
-    /// CHECK: Derived from vault seeds
+    /// Relay PDA that will own the Meteora position and pay rent
+    /// CHECK: Derived from vault + relay_index seeds
     #[account(
-        seeds = [b"protocol_pda", vault.key().as_ref()],
+        mut,
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
         bump,
     )]
-    pub protocol_pda: UncheckedAccount<'info>,
+    pub relay_pda: UncheckedAccount<'info>,
 
     /// Position NFT mint (new keypair, signer)
     /// CHECK: Will be initialized by DAMM v2 program
@@ -1955,6 +2089,132 @@ pub struct CreateMeteoraPosition<'info> {
     /// CHECK: Validated by address constraint
     #[account(address = damm_v2::ID)]
     pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Accounts for creating a Meteora pool via a Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct CreatePoolViaRelay<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA that acts as payer + creator for pool initialization
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        mut,
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// Position NFT mint (new keypair, signer)
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut, signer)]
+    pub position_nft_mint: UncheckedAccount<'info>,
+
+    /// Position NFT account (PDA derived from mint)
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: Pool config account validated by DAMM v2
+    pub config: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Pool account to initialize, validated by DAMM v2
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Position account, validated by DAMM v2
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Token A vault, initialized by DAMM v2
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Token B vault, initialized by DAMM v2
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// Relay's token A account (source of initial liquidity)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_a: UncheckedAccount<'info>,
+
+    /// Relay's token B account (source of initial liquidity)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_b: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Token-2022 program
+    #[account(address = token_2022_program_id())]
+    pub token_2022_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Accounts for funding a relay PDA's token account
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct FundRelay<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA (for derivation verification only)
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// Authority's token account (source)
+    #[account(
+        mut,
+        token::authority = authority,
+    )]
+    pub authority_token_account: Account<'info, anchor_spl::token::TokenAccount>,
+
+    /// Relay PDA's token account (destination)
+    #[account(
+        mut,
+        token::authority = relay_pda,
+    )]
+    pub relay_token_account: Account<'info, anchor_spl::token::TokenAccount>,
+
+    pub token_program: Program<'info, anchor_spl::token::Token>,
 }
 
 // ============================================================
@@ -2000,21 +2260,38 @@ pub struct UserPositionEvent {
 }
 
 #[event]
-pub struct DeployedToMeteoraEvent {
+pub struct DepositedToMeteoraEvent {
     pub vault: Pubkey,
+    pub relay_index: u8,
     pub liquidity_delta: u128,
 }
 
 #[event]
 pub struct WithdrawnFromMeteoraEvent {
     pub vault: Pubkey,
+    pub relay_index: u8,
     pub liquidity_delta: u128,
 }
 
 #[event]
 pub struct MeteoraPositionCreatedEvent {
     pub vault: Pubkey,
+    pub relay_index: u8,
     pub pool: Pubkey,
+}
+
+#[event]
+pub struct PoolCreatedViaRelayEvent {
+    pub vault: Pubkey,
+    pub relay_index: u8,
+    pub pool: Pubkey,
+}
+
+#[event]
+pub struct RelayFundedEvent {
+    pub vault: Pubkey,
+    pub relay_index: u8,
+    pub amount: u64,
 }
 
 #[event]
@@ -2035,4 +2312,6 @@ pub enum ErrorCode {
     ClusterNotSet,
     #[msg("Unauthorized")]
     Unauthorized,
+    #[msg("Invalid relay index (must be 0-11)")]
+    InvalidRelayIndex,
 }

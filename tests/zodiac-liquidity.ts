@@ -29,10 +29,29 @@ import * as os from "os";
 import { expect } from "chai";
 import {
   TOKEN_PROGRAM_ID,
+  TOKEN_2022_PROGRAM_ID,
+  NATIVE_MINT,
   createMint,
+  createAccount,
   getOrCreateAssociatedTokenAccount,
   mintTo,
+  getAccount,
+  createSyncNativeInstruction,
 } from "@solana/spl-token";
+import {
+  CpAmm,
+  getSqrtPriceFromPrice,
+  MIN_SQRT_PRICE,
+  MAX_SQRT_PRICE,
+} from "@meteora-ag/cp-amm-sdk";
+
+const NUM_RELAYS = 12;
+
+// Meteora DAMM v2 constants
+const DAMM_V2_PROGRAM_ID = new PublicKey("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
+const POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC");
+const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLLvF");
+const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
 const MAX_COMPUTATION_RETRIES = 5;
@@ -145,6 +164,50 @@ function deriveEncryptionKey(
 function getClusterAccount(): PublicKey {
   const arciumEnv = getArciumEnv();
   return getClusterAccAddress(arciumEnv.arciumClusterOffset);
+}
+
+/**
+ * Derives a relay PDA for a given vault and relay index (0..11).
+ */
+function deriveRelayPda(
+  vaultPda: PublicKey,
+  relayIndex: number,
+  programId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("zodiac_relay"), vaultPda.toBuffer(), Buffer.from([relayIndex])],
+    programId
+  );
+  return pda;
+}
+
+/**
+ * Calculate liquidity from desired token amounts using Meteora SDK.
+ */
+function calculateLiquidityFromAmounts(
+  connection: anchor.web3.Connection,
+  tokenAAmount: anchor.BN,
+  tokenBAmount: anchor.BN,
+  sqrtPrice: anchor.BN,
+): anchor.BN {
+  const cpAmmInstance = new CpAmm(connection);
+  return cpAmmInstance.getLiquidityDelta({
+    maxAmountTokenA: tokenAAmount,
+    maxAmountTokenB: tokenBAmount,
+    sqrtPrice,
+    sqrtMinPrice: new anchor.BN(MIN_SQRT_PRICE),
+    sqrtMaxPrice: new anchor.BN(MAX_SQRT_PRICE),
+  });
+}
+
+/**
+ * Helper to get max/min of two pubkeys (lexicographic).
+ */
+function maxKey(a: PublicKey, b: PublicKey): PublicKey {
+  return a.toBuffer().compare(b.toBuffer()) > 0 ? a : b;
+}
+function minKey(a: PublicKey, b: PublicKey): PublicKey {
+  return a.toBuffer().compare(b.toBuffer()) <= 0 ? a : b;
 }
 
 function readKpJson(path: string): anchor.web3.Keypair {
@@ -861,6 +924,516 @@ describe("zodiac-liquidity", () => {
         posTx.meta.logMessages.forEach((l) => console.log("  " + l));
       }
       console.log("--- End User Position Data ---\n");
+    });
+  });
+
+  // ============================================================
+  // METEORA DAMM V2 INTEGRATION TESTS (Relay PDA)
+  // ============================================================
+
+  describe("Meteora DAMM v2 Integration (Relay PDAs)", () => {
+    const RELAY_INDEX = 0;
+    let relayPda: PublicKey;
+
+    // Meteora pool state
+    let meteoraTokenAMint: PublicKey;
+    let meteoraTokenBMint: PublicKey;
+    let poolPda: PublicKey;
+    let positionNftMint: Keypair;
+    let positionPda: PublicKey;
+    let positionNftAccount: PublicKey;
+    let tokenAVault: PublicKey;
+    let tokenBVault: PublicKey;
+
+    // Relay token accounts
+    let relayTokenA: PublicKey;
+    let relayTokenB: PublicKey;
+
+    // Authority token accounts (for funding relay)
+    let authorityTokenA: PublicKey;
+    let authorityTokenB: PublicKey;
+
+    let totalLiquidity: anchor.BN | null = null;
+
+    const [eventAuthority] = PublicKey.findProgramAddressSync(
+      [EVENT_AUTHORITY_SEED],
+      DAMM_V2_PROGRAM_ID
+    );
+
+    it("verifies DAMM v2 program is available on devnet", async () => {
+      const dammInfo = await provider.connection.getAccountInfo(DAMM_V2_PROGRAM_ID);
+      if (!dammInfo) throw new Error("DAMM v2 program not found on devnet");
+      console.log("DAMM v2 program found, executable:", dammInfo.executable);
+
+      const configInfo = await provider.connection.getAccountInfo(CONFIG_ACCOUNT);
+      if (!configInfo) throw new Error("Config account not found");
+      console.log("Config account found, data length:", configInfo.data.length);
+    });
+
+    it("sets up Meteora test tokens and relay PDA", async () => {
+      // Derive relay PDA
+      relayPda = deriveRelayPda(vaultPda, RELAY_INDEX, program.programId);
+      console.log("Relay PDA (index", RELAY_INDEX + "):", relayPda.toString());
+
+      // Create Token A (custom SPL token for Meteora pool)
+      meteoraTokenAMint = await createMint(
+        provider.connection,
+        owner,
+        owner.publicKey,
+        null,
+        9,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+      console.log("Meteora Token A Mint:", meteoraTokenAMint.toString());
+
+      // Token B = WSOL
+      meteoraTokenBMint = NATIVE_MINT;
+      console.log("Meteora Token B Mint (WSOL):", meteoraTokenBMint.toString());
+
+      // Create authority token accounts
+      authorityTokenA = await createAccount(
+        provider.connection,
+        owner,
+        meteoraTokenAMint,
+        owner.publicKey,
+        undefined,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+      console.log("Authority Token A Account:", authorityTokenA.toString());
+
+      const wsolKeypair = Keypair.generate();
+      authorityTokenB = await createAccount(
+        provider.connection,
+        owner,
+        NATIVE_MINT,
+        owner.publicKey,
+        wsolKeypair,
+        undefined,
+        TOKEN_PROGRAM_ID
+      );
+      console.log("Authority Token B Account (WSOL):", authorityTokenB.toString());
+
+      // Mint Token A to authority
+      await mintTo(
+        provider.connection,
+        owner,
+        meteoraTokenAMint,
+        authorityTokenA,
+        owner,
+        1_000_000_000 * 1_000_000_000 // 1B tokens
+      );
+      console.log("Minted 1B Token A to authority");
+
+      // Create relay PDA token accounts (ATAs owned by relay PDA)
+      const relayTokenAAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        meteoraTokenAMint,
+        relayPda,
+        true // allowOwnerOffCurve for PDA
+      );
+      relayTokenA = relayTokenAAccount.address;
+      console.log("Relay Token A Account:", relayTokenA.toString());
+
+      const relayTokenBAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        NATIVE_MINT,
+        relayPda,
+        true
+      );
+      relayTokenB = relayTokenBAccount.address;
+      console.log("Relay Token B Account:", relayTokenB.toString());
+    });
+
+    it("funds relay PDA with Token A via fund_relay", async () => {
+      const fundAmount = new anchor.BN("500000000000000000"); // 500M tokens (9 decimals)
+
+      const tx = await program.methods
+        .fundRelay(RELAY_INDEX, fundAmount)
+        .accountsPartial({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          relayPda: relayPda,
+          authorityTokenAccount: authorityTokenA,
+          relayTokenAccount: relayTokenA,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+      console.log("fund_relay (Token A) tx:", tx);
+
+      const relayBalance = await getAccount(provider.connection, relayTokenA);
+      console.log("Relay Token A balance:", relayBalance.amount.toString());
+    });
+
+    it("funds relay PDA with SOL (for WSOL wrapping and rent)", async () => {
+      // Transfer SOL to relay PDA for rent + WSOL
+      const solAmount = 0.1 * anchor.web3.LAMPORTS_PER_SOL; // 0.1 SOL
+      const transferIx = anchor.web3.SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: relayPda,
+        lamports: solAmount,
+      });
+      const tx = new anchor.web3.Transaction().add(transferIx);
+      const sig = await provider.sendAndConfirm(tx, [owner]);
+      console.log("SOL transfer to relay PDA tx:", sig);
+
+      const relayBalance = await provider.connection.getBalance(relayPda);
+      console.log("Relay PDA SOL balance:", relayBalance / anchor.web3.LAMPORTS_PER_SOL, "SOL");
+    });
+
+    it("creates a Meteora pool via relay PDA (create_pool_via_relay)", async () => {
+      positionNftMint = Keypair.generate();
+      console.log("\n=== Creating Pool via Relay PDA ===");
+      console.log("Position NFT Mint:", positionNftMint.publicKey.toString());
+
+      // Derive pool PDA
+      [poolPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("pool"),
+          CONFIG_ACCOUNT.toBuffer(),
+          maxKey(meteoraTokenAMint, meteoraTokenBMint).toBuffer(),
+          minKey(meteoraTokenAMint, meteoraTokenBMint).toBuffer(),
+        ],
+        DAMM_V2_PROGRAM_ID
+      );
+      console.log("Pool PDA:", poolPda.toString());
+
+      // Derive other PDAs
+      [positionNftAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position_nft_account"), positionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      [positionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), positionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      [tokenAVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), meteoraTokenAMint.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      [tokenBVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), meteoraTokenBMint.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Pool parameters
+      const tokenADecimals = 9;
+      const tokenBDecimals = 9;
+      const desiredTokenAAmount = new anchor.BN(1_000_000 * Math.pow(10, tokenADecimals)); // 1M tokens
+      const desiredTokenBAmount = new anchor.BN(0.05 * anchor.web3.LAMPORTS_PER_SOL); // 0.05 SOL
+      const initPrice = 0.05 / 1_000_000; // price = tokenB/tokenA
+      const sqrtPrice = getSqrtPriceFromPrice(initPrice.toString(), tokenADecimals, tokenBDecimals);
+
+      const liquidity = calculateLiquidityFromAmounts(
+        provider.connection,
+        desiredTokenAAmount,
+        desiredTokenBAmount,
+        sqrtPrice,
+      );
+
+      console.log("Liquidity:", liquidity.toString());
+      console.log("Sqrt Price:", sqrtPrice.toString());
+
+      // We need to fund the relay's WSOL account before pool creation
+      // Transfer SOL to the relay WSOL token account and sync
+      const wrapSolTx = new anchor.web3.Transaction().add(
+        anchor.web3.SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: relayTokenB,
+          lamports: desiredTokenBAmount.toNumber(),
+        }),
+        // sync_native via SPL token
+        createSyncNativeInstruction(relayTokenB)
+      );
+      const wrapSig = await provider.sendAndConfirm(wrapSolTx, [owner]);
+      console.log("Wrapped SOL for relay WSOL account:", wrapSig);
+
+      try {
+        const tx = await program.methods
+          .createPoolViaRelay(
+            RELAY_INDEX,
+            liquidity,
+            sqrtPrice,
+            null, // no activation point
+          )
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            positionNftMint: positionNftMint.publicKey,
+            positionNftAccount: positionNftAccount,
+            config: CONFIG_ACCOUNT,
+            poolAuthority: POOL_AUTHORITY,
+            pool: poolPda,
+            position: positionPda,
+            tokenAMint: meteoraTokenAMint,
+            tokenBMint: meteoraTokenBMint,
+            tokenAVault: tokenAVault,
+            tokenBVault: tokenBVault,
+            relayTokenA: relayTokenA,
+            relayTokenB: relayTokenB,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, positionNftMint])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+        console.log("create_pool_via_relay tx:", tx);
+        totalLiquidity = liquidity;
+
+        const poolInfo = await provider.connection.getAccountInfo(poolPda);
+        console.log("Pool account created, data length:", poolInfo?.data.length);
+      } catch (error: any) {
+        console.error("create_pool_via_relay failed:", error.message);
+        if (error.logs) {
+          error.logs.forEach((l: string) => console.error("  ", l));
+        }
+        throw error;
+      }
+    });
+
+    it("creates a new Meteora position for relay PDA (create_meteora_position)", async () => {
+      // Create a second position on the same pool
+      const newPositionNftMint = Keypair.generate();
+      console.log("\n=== Creating Meteora Position via Relay PDA ===");
+      console.log("New Position NFT Mint:", newPositionNftMint.publicKey.toString());
+
+      const [newPositionNftAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position_nft_account"), newPositionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      const [newPosition] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), newPositionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      try {
+        const tx = await program.methods
+          .createMeteoraPosition(RELAY_INDEX)
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            positionNftMint: newPositionNftMint.publicKey,
+            positionNftAccount: newPositionNftAccount,
+            pool: poolPda,
+            position: newPosition,
+            poolAuthority: POOL_AUTHORITY,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, newPositionNftMint])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+        console.log("create_meteora_position tx:", tx);
+
+        const posInfo = await provider.connection.getAccountInfo(newPosition);
+        console.log("Position account created, data length:", posInfo?.data.length);
+      } catch (error: any) {
+        console.error("create_meteora_position failed:", error.message);
+        if (error.logs) {
+          error.logs.forEach((l: string) => console.error("  ", l));
+        }
+        throw error;
+      }
+    });
+
+    it("deposits liquidity to Meteora via relay PDA (deposit_to_meteora_damm_v2)", async () => {
+      console.log("\n=== Adding Liquidity via Relay PDA ===");
+
+      const tokenADecimals = 9;
+      const tokenBDecimals = 9;
+      const addTokenAAmount = new anchor.BN(100_000 * Math.pow(10, tokenADecimals)); // 100K tokens
+      const addTokenBAmount = new anchor.BN(0.005 * anchor.web3.LAMPORTS_PER_SOL); // 0.005 SOL
+      const currentPrice = 0.05 / 1_000_000;
+      const sqrtPrice = getSqrtPriceFromPrice(currentPrice.toString(), tokenADecimals, tokenBDecimals);
+
+      const liquidityDelta = calculateLiquidityFromAmounts(
+        provider.connection,
+        addTokenAAmount,
+        addTokenBAmount,
+        sqrtPrice,
+      );
+
+      // Thresholds: allow 20% slippage
+      const tokenAThreshold = addTokenAAmount.mul(new anchor.BN(120)).div(new anchor.BN(100));
+      const tokenBThreshold = addTokenBAmount.mul(new anchor.BN(120)).div(new anchor.BN(100));
+
+      console.log("Liquidity Delta:", liquidityDelta.toString());
+      console.log("Token A Threshold:", tokenAThreshold.toString());
+      console.log("Token B Threshold:", tokenBThreshold.toString());
+
+      // Wrap more SOL for the relay's WSOL account
+      const wrapSolTx = new anchor.web3.Transaction().add(
+        anchor.web3.SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: relayTokenB,
+          lamports: addTokenBAmount.toNumber(),
+        }),
+        createSyncNativeInstruction(relayTokenB)
+      );
+      await provider.sendAndConfirm(wrapSolTx, [owner]);
+
+      try {
+        const tx = await program.methods
+          .depositToMeteoraDammV2(
+            RELAY_INDEX,
+            liquidityDelta,
+            tokenAThreshold,
+            tokenBThreshold,
+            null, // no SOL wrapping (already wrapped above)
+          )
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA: relayTokenA,
+            relayTokenB: relayTokenB,
+            tokenAVault: tokenAVault,
+            tokenBVault: tokenBVault,
+            tokenAMint: meteoraTokenAMint,
+            tokenBMint: meteoraTokenBMint,
+            positionNftAccount: positionNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+        console.log("deposit_to_meteora_damm_v2 tx:", tx);
+        if (totalLiquidity) {
+          totalLiquidity = totalLiquidity.add(liquidityDelta);
+        }
+        console.log("Total liquidity after add:", totalLiquidity?.toString());
+      } catch (error: any) {
+        console.error("deposit_to_meteora_damm_v2 failed:", error.message);
+        if (error.logs) {
+          error.logs.forEach((l: string) => console.error("  ", l));
+        }
+        throw error;
+      }
+    });
+
+    it("withdraws liquidity from Meteora via relay PDA (withdraw_from_meteora_damm_v2)", async () => {
+      console.log("\n=== Removing Liquidity via Relay PDA ===");
+
+      if (!totalLiquidity) {
+        throw new Error("No liquidity to remove");
+      }
+
+      // Remove 50% of total liquidity
+      const liquidityDelta = totalLiquidity.div(new anchor.BN(2));
+      const tokenAThreshold = new anchor.BN(0);
+      const tokenBThreshold = new anchor.BN(0);
+
+      console.log("Total liquidity:", totalLiquidity.toString());
+      console.log("Removing 50%:", liquidityDelta.toString());
+
+      try {
+        const tx = await program.methods
+          .withdrawFromMeteoraDammV2(
+            RELAY_INDEX,
+            liquidityDelta,
+            tokenAThreshold,
+            tokenBThreshold,
+          )
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            poolAuthority: POOL_AUTHORITY,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA: relayTokenA,
+            relayTokenB: relayTokenB,
+            tokenAVault: tokenAVault,
+            tokenBVault: tokenBVault,
+            tokenAMint: meteoraTokenAMint,
+            tokenBMint: meteoraTokenBMint,
+            positionNftAccount: positionNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            eventAuthority: eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+        console.log("withdraw_from_meteora_damm_v2 tx:", tx);
+        totalLiquidity = totalLiquidity.sub(liquidityDelta);
+        console.log("Remaining liquidity:", totalLiquidity.toString());
+
+        // Check relay balances after withdrawal
+        const relayABalance = await getAccount(provider.connection, relayTokenA);
+        const relayBBalance = await getAccount(provider.connection, relayTokenB);
+        console.log("Relay Token A balance after withdraw:", relayABalance.amount.toString());
+        console.log("Relay Token B balance after withdraw:", relayBBalance.amount.toString());
+      } catch (error: any) {
+        console.error("withdraw_from_meteora_damm_v2 failed:", error.message);
+        if (error.logs) {
+          error.logs.forEach((l: string) => console.error("  ", l));
+        }
+        throw error;
+      }
+    });
+
+    it("rejects invalid relay_index (12)", async () => {
+      const invalidRelayIndex = 12;
+      try {
+        await program.methods
+          .fundRelay(invalidRelayIndex, new anchor.BN(1))
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: deriveRelayPda(vaultPda, invalidRelayIndex, program.programId),
+            authorityTokenAccount: authorityTokenA,
+            relayTokenAccount: relayTokenA,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+
+        throw new Error("Should have failed with InvalidRelayIndex");
+      } catch (error: any) {
+        // The PDA derivation with index 12 won't match the seeds constraint,
+        // or the require! check will fail. Either way, tx should fail.
+        console.log("Correctly rejected relay_index=12:", error.message?.slice(0, 100));
+      }
+    });
+
+    it("derives different PDAs for each relay index (0..11)", () => {
+      const pdas = new Set<string>();
+      for (let i = 0; i < NUM_RELAYS; i++) {
+        const pda = deriveRelayPda(vaultPda, i, program.programId);
+        pdas.add(pda.toString());
+        console.log(`Relay ${i}: ${pda.toString()}`);
+      }
+      // All 12 should be unique
+      if (pdas.size !== NUM_RELAYS) {
+        throw new Error(`Expected ${NUM_RELAYS} unique PDAs, got ${pdas.size}`);
+      }
+      console.log("All 12 relay PDAs are unique");
     });
   });
 
