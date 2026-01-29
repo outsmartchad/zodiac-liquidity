@@ -1,0 +1,918 @@
+import * as anchor from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
+import { ZodiacLiquidity } from "../target/types/zodiac_liquidity";
+import { randomBytes, createHash } from "crypto";
+import nacl from "tweetnacl";
+import {
+  awaitComputationFinalization,
+  getArciumEnv,
+  getCompDefAccOffset,
+  getArciumAccountBaseSeed,
+  getArciumProgramId,
+  uploadCircuit,
+  RescueCipher,
+  deserializeLE,
+  getMXEAccAddress,
+  getMempoolAccAddress,
+  getCompDefAccAddress,
+  getExecutingPoolAccAddress,
+  x25519,
+  getComputationAccAddress,
+  getMXEPublicKey,
+  getClusterAccAddress,
+  getFeePoolAccAddress,
+  getClockAccAddress,
+} from "@arcium-hq/client";
+import * as fs from "fs";
+import * as os from "os";
+import { expect } from "chai";
+import {
+  TOKEN_PROGRAM_ID,
+  createMint,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+} from "@solana/spl-token";
+
+const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
+const MAX_COMPUTATION_RETRIES = 5;
+const RETRY_DELAY_MS = 3000;
+
+// --- File logger ---
+const LOG_FILE = "test-run.log";
+const logStream = fs.createWriteStream(LOG_FILE, { flags: "w" });
+const origLog = console.log;
+console.log = (...args: any[]) => {
+  const line = args.map((a) => (typeof a === "object" ? JSON.stringify(a, null, 2) : String(a))).join(" ");
+  origLog(...args);
+  logStream.write(line + "\n");
+};
+
+/**
+ * Wraps a computation queue + finalize flow with retry logic.
+ * On abort (Error 6000), re-queues with a new computation offset.
+ *
+ * @param label - Human-readable label for logging
+ * @param buildAndSend - Function that takes a computationOffset and sends the queue tx.
+ *                       Returns the tx signature.
+ * @param provider - Anchor provider
+ * @param programId - Program public key
+ * @returns The finalization transaction signature
+ */
+async function queueWithRetry(
+  label: string,
+  buildAndSend: (computationOffset: anchor.BN) => Promise<string>,
+  provider: anchor.AnchorProvider,
+  programId: PublicKey,
+): Promise<string> {
+  for (let attempt = 1; attempt <= MAX_COMPUTATION_RETRIES; attempt++) {
+    const computationOffset = new anchor.BN(randomBytes(8), "hex");
+    try {
+      console.log(`[${label}] Attempt ${attempt}/${MAX_COMPUTATION_RETRIES} - queuing computation (offset: ${computationOffset.toString()})`);
+      const queueSig = await buildAndSend(computationOffset);
+      console.log(`[${label}] Queue tx: ${queueSig}`);
+
+      console.log(`[${label}] Waiting for computation finalization...`);
+      const finalizeSig = await awaitComputationFinalization(
+        provider,
+        computationOffset,
+        programId,
+        "confirmed"
+      );
+      console.log(`[${label}] Finalize tx: ${finalizeSig}`);
+
+      // Check if the finalized tx had an error (AbortedComputation = custom error 6000)
+      const txResult = await provider.connection.getTransaction(finalizeSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+
+      if (txResult?.meta?.err) {
+        console.log(`[${label}] Attempt ${attempt} ABORTED - tx error:`, JSON.stringify(txResult.meta.err));
+        if (txResult.meta.logMessages) {
+          const errorLogs = txResult.meta.logMessages.filter(
+            (l) => l.includes("Error") || l.includes("failed") || l.includes("aborted")
+          );
+          errorLogs.forEach((l) => console.log(`  ${l}`));
+        }
+        if (attempt < MAX_COMPUTATION_RETRIES) {
+          console.log(`[${label}] Retrying in ${RETRY_DELAY_MS}ms...`);
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+          continue;
+        }
+        throw new Error(`[${label}] All ${MAX_COMPUTATION_RETRIES} attempts aborted`);
+      }
+
+      console.log(`[${label}] Computation succeeded on attempt ${attempt}`);
+      return finalizeSig;
+    } catch (err: any) {
+      // Handle errors from queue tx itself (not callback)
+      if (err.message?.includes("All") && err.message?.includes("aborted")) {
+        throw err; // Re-throw our own exhaustion error
+      }
+      console.log(`[${label}] Attempt ${attempt} error:`, err.message || err);
+      if (err.logs) console.log(`[${label}] Logs:`, err.logs);
+      if (attempt < MAX_COMPUTATION_RETRIES) {
+        console.log(`[${label}] Retrying in ${RETRY_DELAY_MS}ms...`);
+        await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error(`[${label}] Exhausted all retries`);
+}
+
+/**
+ * Derives a deterministic X25519 encryption keypair from a Solana wallet.
+ */
+function deriveEncryptionKey(
+  wallet: anchor.web3.Keypair,
+  message: string
+): { privateKey: Uint8Array; publicKey: Uint8Array } {
+  const messageBytes = new TextEncoder().encode(message);
+  const signature = nacl.sign.detached(messageBytes, wallet.secretKey);
+  const privateKey = new Uint8Array(
+    createHash("sha256").update(signature).digest()
+  );
+  const publicKey = x25519.getPublicKey(privateKey);
+  return { privateKey, publicKey };
+}
+
+/**
+ * Gets the cluster account address using the cluster offset from environment.
+ */
+function getClusterAccount(): PublicKey {
+  const arciumEnv = getArciumEnv();
+  return getClusterAccAddress(arciumEnv.arciumClusterOffset);
+}
+
+function readKpJson(path: string): anchor.web3.Keypair {
+  const file = fs.readFileSync(path);
+  return anchor.web3.Keypair.fromSecretKey(
+    new Uint8Array(JSON.parse(file.toString()))
+  );
+}
+
+async function getMXEPublicKeyWithRetry(
+  provider: anchor.AnchorProvider,
+  programId: PublicKey,
+  maxRetries: number = 40,
+  retryDelayMs: number = 1000
+): Promise<Uint8Array> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const mxePublicKey = await getMXEPublicKey(provider, programId);
+      if (mxePublicKey) {
+        return mxePublicKey;
+      }
+    } catch (error) {
+      console.log(`Attempt ${attempt} failed to fetch MXE public key:`, error);
+    }
+
+    if (attempt < maxRetries) {
+      console.log(
+        `Retrying in ${retryDelayMs}ms... (attempt ${attempt}/${maxRetries})`
+      );
+      await new Promise((resolve) => setTimeout(resolve, retryDelayMs));
+    }
+  }
+
+  throw new Error(
+    `Failed to fetch MXE public key after ${maxRetries} attempts`
+  );
+}
+
+describe("zodiac-liquidity", () => {
+  anchor.setProvider(anchor.AnchorProvider.env());
+  const program = anchor.workspace.ZodiacLiquidity as Program<ZodiacLiquidity>;
+  const provider = anchor.getProvider() as anchor.AnchorProvider;
+
+  type Event = anchor.IdlEvents<(typeof program)["idl"]>;
+  const awaitEvent = async <E extends keyof Event>(
+    eventName: E
+  ): Promise<Event[E]> => {
+    let listenerId: number;
+    const event = await new Promise<Event[E]>((res) => {
+      listenerId = program.addEventListener(eventName, (event) => {
+        res(event);
+      });
+    });
+    await program.removeEventListener(listenerId);
+    return event;
+  };
+
+  const clusterAccount = getClusterAccount();
+  let owner: Keypair;
+  let tokenMint: PublicKey;
+  let vaultPda: PublicKey;
+  let userPositionPda: PublicKey;
+  let mxePublicKey: Uint8Array;
+  let cipher: RescueCipher;
+  let encryptionKeys: { privateKey: Uint8Array; publicKey: Uint8Array };
+
+  before(async () => {
+    console.log("=".repeat(60));
+    console.log("Zodiac Liquidity Tests - Setup");
+    console.log("=".repeat(60));
+    console.log("Program ID:", program.programId.toString());
+
+    owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
+    console.log("Owner:", owner.publicKey.toString());
+
+    // Get MXE public key for encryption
+    try {
+      mxePublicKey = await getMXEPublicKeyWithRetry(
+        provider,
+        program.programId
+      );
+      console.log("MXE x25519 pubkey:", Buffer.from(mxePublicKey).toString("hex"));
+
+      // Derive encryption keys from wallet
+      encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
+      const sharedSecret = x25519.getSharedSecret(
+        encryptionKeys.privateKey,
+        mxePublicKey
+      );
+      cipher = new RescueCipher(sharedSecret);
+      console.log("Encryption cipher initialized");
+    } catch (e) {
+      console.log("Warning: Could not get MXE public key. MXE may not be initialized yet.");
+      console.log("This is expected for first run - will initialize computation definitions first.");
+    }
+
+    // Create test token mint
+    console.log("Creating test token mint...");
+    tokenMint = await createMint(
+      provider.connection,
+      owner,
+      owner.publicKey,
+      null,
+      9 // 9 decimals
+    );
+    console.log("Token mint:", tokenMint.toString());
+
+    // Derive vault PDA
+    [vaultPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("vault"), tokenMint.toBuffer()],
+      program.programId
+    );
+    console.log("Vault PDA:", vaultPda.toString());
+
+    // Derive user position PDA
+    [userPositionPda] = PublicKey.findProgramAddressSync(
+      [Buffer.from("position"), vaultPda.toBuffer(), owner.publicKey.toBuffer()],
+      program.programId
+    );
+    console.log("User Position PDA:", userPositionPda.toString());
+  });
+
+  describe("Computation Definition Initialization", () => {
+    it("initializes init_vault computation definition", async () => {
+      const sig = await initCompDef(program, owner, "init_vault", "initVaultCompDef");
+      console.log("Init vault comp def tx:", sig);
+    });
+
+    it("initializes init_user_position computation definition", async () => {
+      const sig = await initCompDef(program, owner, "init_user_position", "initUserPositionCompDef");
+      console.log("Init user position comp def tx:", sig);
+    });
+
+    it("initializes deposit computation definition", async () => {
+      const sig = await initCompDef(program, owner, "deposit", "initDepositCompDef");
+      console.log("Init deposit comp def tx:", sig);
+    });
+
+    it("initializes reveal_pending_deposits computation definition", async () => {
+      const sig = await initCompDef(program, owner, "reveal_pending_deposits", "initRevealPendingCompDef");
+      console.log("Init reveal pending comp def tx:", sig);
+    });
+
+    it("initializes record_liquidity computation definition", async () => {
+      const sig = await initCompDef(program, owner, "record_liquidity", "initRecordLiquidityCompDef");
+      console.log("Init record liquidity comp def tx:", sig);
+    });
+
+    it("initializes compute_withdrawal computation definition", async () => {
+      const sig = await initCompDef(program, owner, "compute_withdrawal", "initWithdrawCompDef");
+      console.log("Init withdraw comp def tx:", sig);
+    });
+
+    it("initializes get_user_position computation definition", async () => {
+      const sig = await initCompDef(program, owner, "get_user_position", "initGetPositionCompDef");
+      console.log("Init get position comp def tx:", sig);
+    });
+
+    it("initializes clear_position computation definition", async () => {
+      const sig = await initCompDef(program, owner, "clear_position", "initClearPositionCompDef");
+      console.log("Init clear position comp def tx:", sig);
+    });
+  });
+
+  describe("Vault Creation", () => {
+    it("creates a new vault", async () => {
+      // Refresh MXE public key after comp defs are initialized (if not already set)
+      if (!mxePublicKey || !cipher) {
+        console.log("MXE key not set yet, waiting for keygen to complete...");
+        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
+        encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
+        const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
+        cipher = new RescueCipher(sharedSecret);
+      } else {
+        console.log("MXE key already available, reusing...");
+        try {
+          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
+          if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
+            console.log("MXE key changed, updating cipher...");
+            mxePublicKey = freshKey;
+            encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
+            const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
+            cipher = new RescueCipher(sharedSecret);
+          }
+        } catch (e) {
+          console.log("Could not refresh MXE key, using cached key");
+        }
+      }
+
+      const nonce = randomBytes(16);
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const finalizeSig = await queueWithRetry(
+        "createVault",
+        async (computationOffset) => {
+          return program.methods
+            .createVault(computationOffset, new anchor.BN(deserializeLE(nonce).toString()))
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              tokenMint: tokenMint,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      // Verify vault was created
+      const vaultAccount = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("\n--- Vault Creation Data ---");
+      console.log("Vault authority:", vaultAccount.authority.toString());
+      console.log("Vault token_mint:", vaultAccount.tokenMint.toString());
+      console.log("Vault state[0] (pending_deposits):", Buffer.from(vaultAccount.vaultState[0]).toString("hex"));
+      console.log("Vault state[1] (total_liquidity):", Buffer.from(vaultAccount.vaultState[1]).toString("hex"));
+      console.log("Vault state[2] (total_deposited):", Buffer.from(vaultAccount.vaultState[2]).toString("hex"));
+      console.log("Vault nonce:", vaultAccount.nonce.toString());
+      console.log("--- End Vault Creation Data ---\n");
+      expect(vaultAccount.authority.toString()).to.equal(owner.publicKey.toString());
+    });
+  });
+
+  describe("User Position Creation", () => {
+    it("creates a user position", async () => {
+      const nonce = randomBytes(16);
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const finalizeSig = await queueWithRetry(
+        "createUserPosition",
+        async (computationOffset) => {
+          return program.methods
+            .createUserPosition(computationOffset, new anchor.BN(deserializeLE(nonce).toString()))
+            .accountsPartial({
+              user: owner.publicKey,
+              vault: vaultPda,
+              userPosition: userPositionPda,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("User position created, finalize tx:", finalizeSig);
+
+      const posAccount = await program.account.userPositionAccount.fetch(userPositionPda);
+      console.log("\n--- User Position Creation Data ---");
+      console.log("Position owner:", posAccount.owner.toString());
+      console.log("Position vault:", posAccount.vault.toString());
+      console.log("Position state[0] (deposited):", Buffer.from(posAccount.positionState[0]).toString("hex"));
+      console.log("Position state[1] (lp_share):", Buffer.from(posAccount.positionState[1]).toString("hex"));
+      console.log("Position nonce:", posAccount.nonce.toString());
+      console.log("--- End User Position Creation Data ---\n");
+    });
+  });
+
+  describe("Deposit Flow", () => {
+    it("deposits tokens with encrypted amount", async () => {
+      // Encrypt the deposit amount
+      const depositAmount = BigInt(1_000_000_000); // 1 token with 9 decimals
+      const plaintext = [depositAmount];
+      const nonce = randomBytes(16);
+      const ciphertext = cipher.encrypt(plaintext, nonce);
+
+      // Create user token account and mint tokens
+      const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        owner.publicKey
+      );
+
+      await mintTo(
+        provider.connection,
+        owner,
+        tokenMint,
+        userTokenAccount.address,
+        owner,
+        2_000_000_000 // Mint 2 tokens
+      );
+
+      // Create vault token account
+      const vaultTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        vaultPda,
+        true // allowOwnerOffCurve for PDA
+      );
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const finalizeSig = await queueWithRetry(
+        "deposit",
+        async (computationOffset) => {
+          return program.methods
+            .deposit(
+              computationOffset,
+              Array.from(ciphertext[0]) as number[],
+              Array.from(encryptionKeys.publicKey) as number[],
+              new anchor.BN(deserializeLE(nonce).toString()),
+              new anchor.BN(depositAmount.toString())
+            )
+            .accountsPartial({
+              depositor: owner.publicKey,
+              vault: vaultPda,
+              userPosition: userPositionPda,
+              userTokenAccount: userTokenAccount.address,
+              vaultTokenAccount: vaultTokenAccount.address,
+              tokenMint: tokenMint,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              tokenProgram: TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Deposit succeeded, finalize tx:", finalizeSig);
+
+      // --- Log deposit data ---
+      console.log("\n--- Deposit Data ---");
+      console.log("Deposit amount (plaintext):", depositAmount.toString());
+
+      const vaultAfterDeposit = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("Vault state after deposit:");
+      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterDeposit.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterDeposit.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterDeposit.vaultState[2]).toString("hex"));
+      console.log("  nonce:", vaultAfterDeposit.nonce.toString());
+
+      const posAfterDeposit = await program.account.userPositionAccount.fetch(userPositionPda);
+      console.log("User position after deposit:");
+      console.log("  position_state[0] (deposited):", Buffer.from(posAfterDeposit.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterDeposit.positionState[1]).toString("hex"));
+      console.log("  nonce:", posAfterDeposit.nonce.toString());
+      console.log("--- End Deposit Data ---\n");
+    });
+  });
+
+  describe("Reveal Pending Deposits", () => {
+    it("reveals aggregate pending deposits", async () => {
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const finalizeSig = await queueWithRetry(
+        "revealPendingDeposits",
+        async (computationOffset) => {
+          return program.methods
+            .revealPendingDeposits(computationOffset)
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("reveal_pending_deposits")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Reveal succeeded, finalize tx:", finalizeSig);
+
+      // --- Log reveal data ---
+      console.log("\n--- Reveal Pending Deposits Data ---");
+      // Parse the finalize tx logs for the PendingDepositsRevealedEvent
+      const revealTx = await provider.connection.getTransaction(finalizeSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (revealTx?.meta?.logMessages) {
+        console.log("Reveal tx logs:");
+        revealTx.meta.logMessages.forEach((l) => console.log("  " + l));
+      }
+
+      const vaultAfterReveal = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("Vault state after reveal:");
+      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterReveal.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterReveal.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterReveal.vaultState[2]).toString("hex"));
+      console.log("  nonce:", vaultAfterReveal.nonce.toString());
+      console.log("--- End Reveal Data ---\n");
+    });
+  });
+
+  describe("Record Liquidity", () => {
+    it("records liquidity received from Meteora", async () => {
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const liquidityDelta = new anchor.BN(500_000_000); // liquidity delta from add_liquidity
+
+      const finalizeSig = await queueWithRetry(
+        "recordLiquidity",
+        async (computationOffset) => {
+          return program.methods
+            .recordLiquidity(computationOffset, liquidityDelta)
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("record_liquidity")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Record liquidity succeeded, finalize tx:", finalizeSig);
+
+      // Verify vault state updated
+      const vaultAfterRecord = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("\n--- Record Liquidity Data ---");
+      console.log("Vault state after record liquidity:");
+      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterRecord.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterRecord.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterRecord.vaultState[2]).toString("hex"));
+      console.log("  nonce:", vaultAfterRecord.nonce.toString());
+      console.log("--- End Record Liquidity Data ---\n");
+    });
+  });
+
+  describe("Compute Withdrawal", () => {
+    it("computes withdrawal for user", async () => {
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const sharedNonce = randomBytes(16);
+
+      const finalizeSig = await queueWithRetry(
+        "computeWithdrawal",
+        async (computationOffset) => {
+          return program.methods
+            .withdraw(
+              computationOffset,
+              Array.from(encryptionKeys.publicKey) as number[],
+              new anchor.BN(deserializeLE(sharedNonce).toString())
+            )
+            .accountsPartial({
+              user: owner.publicKey,
+              signPdaAccount: signPdaAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("compute_withdrawal")).readUInt32LE()
+              ),
+              clusterAccount: clusterAccount,
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+              vault: vaultPda,
+              userPosition: userPositionPda,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Withdrawal computation succeeded, finalize tx:", finalizeSig);
+
+      // --- Log withdrawal data ---
+      console.log("\n--- Withdrawal Data ---");
+      const withdrawTx = await provider.connection.getTransaction(finalizeSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (withdrawTx?.meta?.logMessages) {
+        console.log("Withdrawal tx logs:");
+        withdrawTx.meta.logMessages.forEach((l) => console.log("  " + l));
+      }
+
+      const vaultAfterWithdraw = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("Vault state after withdrawal:");
+      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterWithdraw.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterWithdraw.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterWithdraw.vaultState[2]).toString("hex"));
+      console.log("  nonce:", vaultAfterWithdraw.nonce.toString());
+
+      const posAfterWithdraw = await program.account.userPositionAccount.fetch(userPositionPda);
+      console.log("User position after withdrawal:");
+      console.log("  position_state[0] (deposited):", Buffer.from(posAfterWithdraw.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterWithdraw.positionState[1]).toString("hex"));
+      console.log("  nonce:", posAfterWithdraw.nonce.toString());
+      console.log("--- End Withdrawal Data ---\n");
+    });
+  });
+
+  describe("Clear Position", () => {
+    it("clears user position after withdrawal", async () => {
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const withdrawAmount = new anchor.BN(1_000_000_000); // withdraw full deposit (1 token)
+
+      const finalizeSig = await queueWithRetry(
+        "clearPosition",
+        async (computationOffset) => {
+          return program.methods
+            .clearPosition(computationOffset, withdrawAmount)
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              userPosition: userPositionPda,
+              signPdaAccount: signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              clusterAccount: clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("clear_position")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Clear position succeeded, finalize tx:", finalizeSig);
+
+      // Verify both vault and user position updated
+      const vaultAfterClear = await program.account.vaultAccount.fetch(vaultPda);
+      console.log("\n--- Clear Position Data ---");
+      console.log("Vault state after clear:");
+      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterClear.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterClear.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterClear.vaultState[2]).toString("hex"));
+      console.log("  nonce:", vaultAfterClear.nonce.toString());
+
+      const posAfterClear = await program.account.userPositionAccount.fetch(userPositionPda);
+      console.log("User position after clear:");
+      console.log("  position_state[0] (deposited):", Buffer.from(posAfterClear.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterClear.positionState[1]).toString("hex"));
+      console.log("  nonce:", posAfterClear.nonce.toString());
+      console.log("--- End Clear Position Data ---\n");
+    });
+  });
+
+  describe("Get User Position", () => {
+    it("gets user position", async () => {
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const sharedNonce = randomBytes(16);
+
+      const finalizeSig = await queueWithRetry(
+        "getUserPosition",
+        async (computationOffset) => {
+          return program.methods
+            .getUserPosition(
+              computationOffset,
+              Array.from(encryptionKeys.publicKey) as number[],
+              new anchor.BN(deserializeLE(sharedNonce).toString())
+            )
+            .accountsPartial({
+              user: owner.publicKey,
+              signPdaAccount: signPdaAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              computationAccount: getComputationAccAddress(
+                getArciumEnv().arciumClusterOffset,
+                computationOffset
+              ),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("get_user_position")).readUInt32LE()
+              ),
+              clusterAccount: clusterAccount,
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+              arciumProgram: getArciumProgramId(),
+              vault: vaultPda,
+              userPosition: userPositionPda,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Get user position succeeded, finalize tx:", finalizeSig);
+
+      // --- Log position data ---
+      console.log("\n--- User Position Data ---");
+      const posTx = await provider.connection.getTransaction(finalizeSig, {
+        commitment: "confirmed",
+        maxSupportedTransactionVersion: 0,
+      });
+      if (posTx?.meta?.logMessages) {
+        console.log("Get position tx logs:");
+        posTx.meta.logMessages.forEach((l) => console.log("  " + l));
+      }
+      console.log("--- End User Position Data ---\n");
+    });
+  });
+
+  after(() => {
+    console.log("=".repeat(60));
+    console.log("All tests complete. Log saved to:", LOG_FILE);
+    console.log("=".repeat(60));
+    logStream.end();
+  });
+
+  // Helper function to initialize computation definitions (idempotent)
+  // With offchain storage, we just init the comp def - ARX nodes fetch circuits from URL
+  async function initCompDef(
+    program: Program<ZodiacLiquidity>,
+    owner: Keypair,
+    circuitName: string,
+    methodName: string
+  ): Promise<string> {
+    const baseSeedCompDefAcc = getArciumAccountBaseSeed(
+      "ComputationDefinitionAccount"
+    );
+    const offset = getCompDefAccOffset(circuitName);
+
+    const compDefPDA = PublicKey.findProgramAddressSync(
+      [baseSeedCompDefAcc, program.programId.toBuffer(), offset],
+      getArciumProgramId()
+    )[0];
+
+    console.log(`${circuitName} comp def PDA:`, compDefPDA.toBase58());
+
+    // Check if account already exists and is owned by Arcium program
+    const accountInfo = await provider.connection.getAccountInfo(compDefPDA);
+
+    if (accountInfo !== null && accountInfo.owner.equals(getArciumProgramId())) {
+      console.log(`${circuitName} comp def already exists (${accountInfo.data.length} bytes), skipping`);
+      return "skipped";
+    }
+
+    // Initialize comp def with offchain circuit source
+    // The program specifies the URL and hash - ARX nodes will fetch and verify
+    console.log(`Initializing ${circuitName} comp def (offchain circuit)...`);
+    // @ts-ignore - Dynamic method call
+    const sig = await program.methods[methodName]()
+      .accounts({
+        compDefAccount: compDefPDA,
+        payer: owner.publicKey,
+        mxeAccount: getMXEAccAddress(program.programId),
+      })
+      .signers([owner])
+      .rpc();
+    console.log(`${circuitName} init tx:`, sig);
+
+    return sig;
+  }
+});

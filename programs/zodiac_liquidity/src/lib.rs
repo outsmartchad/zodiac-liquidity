@@ -1,0 +1,2038 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token_interface::TokenInterface;
+use anchor_spl::token;
+use arcium_anchor::prelude::*;
+use arcium_client::idl::arcium::types::{CallbackAccount, CircuitSource, OffChainCircuitSource};
+use arcium_macros::circuit_hash;
+use std::str::FromStr;
+
+// Declare the external DAMM v2 program from IDL
+declare_program!(damm_v2);
+
+/// WSOL (Wrapped SOL) mint address
+fn native_mint() -> Pubkey {
+    Pubkey::from_str("So11111111111111111111111111111111111111112").unwrap()
+}
+
+/// Check if a mint is WSOL
+fn is_native_mint(mint: &Pubkey) -> bool {
+    mint == &native_mint()
+}
+
+/// DAMM v2 pool authority address (constant PDA)
+fn damm_v2_pool_authority() -> Pubkey {
+    Pubkey::from_str("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC").unwrap()
+}
+
+/// Token-2022 program ID
+fn token_2022_program_id() -> Pubkey {
+    Pubkey::from_str("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb").unwrap()
+}
+
+// Computation definition offsets (derived from instruction names)
+const COMP_DEF_OFFSET_INIT_VAULT: u32 = comp_def_offset("init_vault");
+const COMP_DEF_OFFSET_INIT_USER_POSITION: u32 = comp_def_offset("init_user_position");
+const COMP_DEF_OFFSET_DEPOSIT: u32 = comp_def_offset("deposit");
+const COMP_DEF_OFFSET_REVEAL_PENDING: u32 = comp_def_offset("reveal_pending_deposits");
+const COMP_DEF_OFFSET_RECORD_LIQUIDITY: u32 = comp_def_offset("record_liquidity");
+const COMP_DEF_OFFSET_WITHDRAW: u32 = comp_def_offset("compute_withdrawal");
+const COMP_DEF_OFFSET_CLEAR_POSITION: u32 = comp_def_offset("clear_position");
+const COMP_DEF_OFFSET_GET_POSITION: u32 = comp_def_offset("get_user_position");
+
+declare_id!("5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu");
+
+#[arcium_program]
+pub mod zodiac_liquidity {
+    use super::*;
+
+    // ============================================================
+    // COMPUTATION DEFINITION INITIALIZERS (one-time setup per circuit)
+    // ============================================================
+
+    pub fn init_vault_comp_def(ctx: Context<InitVaultCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/init_vault.arcis".to_string(),
+                hash: circuit_hash!("init_vault"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_user_position_comp_def(ctx: Context<InitUserPositionCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/init_user_position.arcis".to_string(),
+                hash: circuit_hash!("init_user_position"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_deposit_comp_def(ctx: Context<InitDepositCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/deposit.arcis".to_string(),
+                hash: circuit_hash!("deposit"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_reveal_pending_comp_def(ctx: Context<InitRevealPendingCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/reveal_pending_deposits.arcis".to_string(),
+                hash: circuit_hash!("reveal_pending_deposits"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_record_liquidity_comp_def(ctx: Context<InitRecordLiquidityCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/record_liquidity.arcis".to_string(),
+                hash: circuit_hash!("record_liquidity"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_withdraw_comp_def(ctx: Context<InitWithdrawCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/compute_withdrawal.arcis".to_string(),
+                hash: circuit_hash!("compute_withdrawal"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_get_position_comp_def(ctx: Context<InitGetPositionCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/get_user_position.arcis".to_string(),
+                hash: circuit_hash!("get_user_position"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    pub fn init_clear_position_comp_def(ctx: Context<InitClearPositionCompDef>) -> Result<()> {
+        init_comp_def(
+            ctx.accounts,
+            Some(CircuitSource::OffChain(OffChainCircuitSource {
+                source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/clear_position.arcis".to_string(),
+                hash: circuit_hash!("clear_position"),
+            })),
+            None,
+        )?;
+        Ok(())
+    }
+
+    // ============================================================
+    // CREATE VAULT (initializes encrypted vault state)
+    // ============================================================
+
+    /// Creates a new privacy vault for a specific token mint.
+    /// Initializes encrypted vault state via MPC.
+    pub fn create_vault(
+        ctx: Context<CreateVault>,
+        computation_offset: u64,
+        nonce: u128,
+    ) -> Result<()> {
+        msg!("Creating new privacy vault");
+
+        // Initialize vault account
+        ctx.accounts.vault.bump = ctx.bumps.vault;
+        ctx.accounts.vault.authority = ctx.accounts.authority.key();
+        ctx.accounts.vault.token_mint = ctx.accounts.token_mint.key();
+        ctx.accounts.vault.nonce = nonce;
+        ctx.accounts.vault.vault_state = [[0; 32]; 3]; // 3 u64s: pending, lp_tokens, total_deposited
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        // Queue MPC computation to initialize encrypted vault state
+        let args = ArgBuilder::new().plaintext_u128(nonce).build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![InitVaultCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[CallbackAccount {
+                    pubkey: ctx.accounts.vault.key(),
+                    is_writable: true,
+                }],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "init_vault")]
+    pub fn init_vault_callback(
+        ctx: Context<InitVaultCallback>,
+        output: SignedComputationOutputs<InitVaultOutput>,
+    ) -> Result<()> {
+        let o = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(InitVaultOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        ctx.accounts.vault.vault_state = o.ciphertexts;
+        ctx.accounts.vault.nonce = o.nonce;
+
+        emit!(VaultCreatedEvent {
+            vault: ctx.accounts.vault.key(),
+            token_mint: ctx.accounts.vault.token_mint,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // CREATE USER POSITION (initializes encrypted user position)
+    // ============================================================
+
+    /// Creates a new user position in the vault.
+    pub fn create_user_position(
+        ctx: Context<CreateUserPosition>,
+        computation_offset: u64,
+        nonce: u128,
+    ) -> Result<()> {
+        msg!("Creating user position");
+
+        ctx.accounts.user_position.bump = ctx.bumps.user_position;
+        ctx.accounts.user_position.owner = ctx.accounts.user.key();
+        ctx.accounts.user_position.vault = ctx.accounts.vault.key();
+        ctx.accounts.user_position.nonce = nonce;
+        ctx.accounts.user_position.position_state = [[0; 32]; 2]; // 2 u64s: deposited, lp_share
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new().plaintext_u128(nonce).build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![InitUserPositionCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[CallbackAccount {
+                    pubkey: ctx.accounts.user_position.key(),
+                    is_writable: true,
+                }],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "init_user_position")]
+    pub fn init_user_position_callback(
+        ctx: Context<InitUserPositionCallback>,
+        output: SignedComputationOutputs<InitUserPositionOutput>,
+    ) -> Result<()> {
+        let o = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(InitUserPositionOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        ctx.accounts.user_position.position_state = o.ciphertexts;
+        ctx.accounts.user_position.nonce = o.nonce;
+
+        Ok(())
+    }
+
+    // ============================================================
+    // DEPOSIT (adds encrypted amount to vault and user position)
+    // ============================================================
+
+    /// Deposits tokens into the vault with encrypted amount.
+    /// Transfers tokens from user to vault, then updates encrypted state.
+    pub fn deposit(
+        ctx: Context<Deposit>,
+        computation_offset: u64,
+        encrypted_amount: [u8; 32],      // Encrypted deposit amount
+        encryption_pubkey: [u8; 32],      // User's x25519 public key
+        amount_nonce: u128,               // Nonce for encrypted amount
+        amount: u64,                      // Plaintext amount for token transfer
+    ) -> Result<()> {
+        msg!("Processing shielded deposit of {} tokens", amount);
+
+        // Transfer tokens from user to vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.user_token_account.to_account_info(),
+                    to: ctx.accounts.vault_token_account.to_account_info(),
+                    authority: ctx.accounts.depositor.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        // Build arguments for MPC:
+        // 1. User's encryption pubkey + nonce + encrypted amount (DepositInput)
+        // 2. Vault state nonce + account data
+        // 3. User position nonce + account data
+        let args = ArgBuilder::new()
+            // User input (Enc<Shared, DepositInput>)
+            .x25519_pubkey(encryption_pubkey)
+            .plaintext_u128(amount_nonce)
+            .encrypted_u64(encrypted_amount)
+            // Vault state (Enc<Mxe, VaultState>)
+            .plaintext_u128(ctx.accounts.vault.nonce)
+            .account(
+                ctx.accounts.vault.key(),
+                8 + 1 + 32 + 32, // discriminator + bump + authority + token_mint
+                32 * 3,          // 3 encrypted u64s
+            )
+            // User position (Enc<Mxe, UserPosition>)
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32, // discriminator + bump + owner + vault
+                32 * 2,          // 2 encrypted u64s
+            )
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![DepositCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[
+                    CallbackAccount {
+                        pubkey: ctx.accounts.vault.key(),
+                        is_writable: true,
+                    },
+                    CallbackAccount {
+                        pubkey: ctx.accounts.user_position.key(),
+                        is_writable: true,
+                    },
+                ],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "deposit")]
+    pub fn deposit_callback(
+        ctx: Context<DepositCallback>,
+        output: SignedComputationOutputs<DepositOutput>,
+    ) -> Result<()> {
+        // Tuple returns are wrapped: DepositOutput { field_0: DepositOutputStruct0 }
+        // where DepositOutputStruct0 { field_0: vault, field_1: position }
+        let tuple = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(DepositOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        // Update vault state (field_0 of the tuple)
+        ctx.accounts.vault.vault_state = tuple.field_0.ciphertexts;
+        ctx.accounts.vault.nonce = tuple.field_0.nonce;
+
+        // Update user position (field_1 of the tuple)
+        ctx.accounts.user_position.position_state = tuple.field_1.ciphertexts;
+        ctx.accounts.user_position.nonce = tuple.field_1.nonce;
+
+        emit!(DepositEvent {
+            vault: ctx.accounts.vault.key(),
+            user: ctx.accounts.user_position.owner,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // REVEAL PENDING DEPOSITS (for Meteora deployment)
+    // ============================================================
+
+    /// Reveals the total pending deposits for deployment to Meteora.
+    /// Only callable by vault authority.
+    pub fn reveal_pending_deposits(
+        ctx: Context<RevealPendingDeposits>,
+        computation_offset: u64,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Revealing pending deposits for deployment");
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new()
+            .plaintext_u128(ctx.accounts.vault.nonce)
+            .account(
+                ctx.accounts.vault.key(),
+                8 + 1 + 32 + 32,
+                32 * 3,
+            )
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![RevealPendingDepositsCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[CallbackAccount {
+                    pubkey: ctx.accounts.vault.key(),
+                    is_writable: false,
+                }],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "reveal_pending_deposits")]
+    pub fn reveal_pending_deposits_callback(
+        ctx: Context<RevealPendingDepositsCallback>,
+        output: SignedComputationOutputs<RevealPendingDepositsOutput>,
+    ) -> Result<()> {
+        let pending_amount = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(RevealPendingDepositsOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        emit!(PendingDepositsRevealedEvent {
+            vault: ctx.accounts.vault.key(),
+            total_pending: pending_amount,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // RECORD LIQUIDITY (after Meteora deployment)
+    // ============================================================
+
+    /// Records liquidity received from Meteora deployment.
+    /// Called by authority after successful deployment.
+    pub fn record_liquidity(
+        ctx: Context<RecordLiquidity>,
+        computation_offset: u64,
+        liquidity_delta: u64,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Recording {} liquidity from Meteora", liquidity_delta);
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new()
+            .plaintext_u64(liquidity_delta)
+            .plaintext_u128(ctx.accounts.vault.nonce)
+            .account(
+                ctx.accounts.vault.key(),
+                8 + 1 + 32 + 32,
+                32 * 3,
+            )
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![RecordLiquidityCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[CallbackAccount {
+                    pubkey: ctx.accounts.vault.key(),
+                    is_writable: true,
+                }],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "record_liquidity")]
+    pub fn record_liquidity_callback(
+        ctx: Context<RecordLiquidityCallback>,
+        output: SignedComputationOutputs<RecordLiquidityOutput>,
+    ) -> Result<()> {
+        let o = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(RecordLiquidityOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        ctx.accounts.vault.vault_state = o.ciphertexts;
+        ctx.accounts.vault.nonce = o.nonce;
+
+        emit!(LiquidityRecordedEvent {
+            vault: ctx.accounts.vault.key(),
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // WITHDRAW (computes pro-rata share and withdraws)
+    // ============================================================
+
+    /// Withdraws user's deposited amount from the vault.
+    /// Simplified: user withdraws everything, conversion to LP tokens done off-chain.
+    pub fn withdraw(
+        ctx: Context<Withdraw>,
+        computation_offset: u64,
+        encryption_pubkey: [u8; 32],
+        shared_nonce: u128,
+    ) -> Result<()> {
+        msg!("Processing withdrawal");
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        // Circuit: compute_withdrawal(user_position: Enc<Mxe, UserPosition>, user_pubkey: Shared) -> Enc<Shared, u64>
+        // Shared type requires x25519_pubkey + u128 nonce (per circuit .idarc)
+        let args = ArgBuilder::new()
+            // User position (Enc<Mxe, UserPosition>)
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32,
+                32 * 2,
+            )
+            // User pubkey (Shared) - requires both pubkey and nonce
+            .x25519_pubkey(encryption_pubkey)
+            .plaintext_u128(shared_nonce)
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![ComputeWithdrawalCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[
+                    CallbackAccount {
+                        pubkey: ctx.accounts.vault.key(),
+                        is_writable: false,
+                    },
+                    CallbackAccount {
+                        pubkey: ctx.accounts.user_position.key(),
+                        is_writable: false,
+                    },
+                ],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "compute_withdrawal")]
+    pub fn compute_withdrawal_callback(
+        ctx: Context<ComputeWithdrawalCallback>,
+        output: SignedComputationOutputs<ComputeWithdrawalOutput>,
+    ) -> Result<()> {
+        // New simplified circuit just returns Enc<Shared, u64> (user's deposited amount)
+        let o = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(ComputeWithdrawalOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        // Emit withdrawal amount (encrypted for user)
+        // State updates happen in separate clear_position call
+        emit!(WithdrawEvent {
+            vault: ctx.accounts.vault.key(),
+            user: ctx.accounts.user_position.owner,
+            encrypted_amount: o.ciphertexts[0],
+            nonce: o.nonce,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // GET USER POSITION (lets user see their own balance)
+    // ============================================================
+
+    /// Gets user's current position (encrypted for the user only).
+    /// Note: LP share calculation moved off-chain to reduce circuit complexity.
+    pub fn get_user_position(
+        ctx: Context<GetUserPosition>,
+        computation_offset: u64,
+        encryption_pubkey: [u8; 32],
+        shared_nonce: u128,
+    ) -> Result<()> {
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        // Shared type requires x25519_pubkey + u128 nonce (per circuit .idarc)
+        let args = ArgBuilder::new()
+            // User position (Enc<Mxe, UserPosition>)
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32,
+                32 * 2,
+            )
+            // User pubkey (Shared) - requires both pubkey and nonce
+            .x25519_pubkey(encryption_pubkey)
+            .plaintext_u128(shared_nonce)
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![GetUserPositionCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "get_user_position")]
+    pub fn get_user_position_callback(
+        ctx: Context<GetUserPositionCallback>,
+        output: SignedComputationOutputs<GetUserPositionOutput>,
+    ) -> Result<()> {
+        let o = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(GetUserPositionOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        emit!(UserPositionEvent {
+            encrypted_deposited: o.ciphertexts[0],
+            encrypted_lp_share: o.ciphertexts[1],
+            nonce: o.nonce,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // CLEAR POSITION (zeros user position after withdrawal confirmed)
+    // ============================================================
+
+    /// Clears a user's position after withdrawal has been confirmed.
+    /// Only callable by vault authority (protocol clears after confirming withdrawal).
+    pub fn clear_position(
+        ctx: Context<ClearPosition>,
+        computation_offset: u64,
+        withdraw_amount: u64,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Clearing position with withdraw amount {}", withdraw_amount);
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new()
+            // User position (Enc<Mxe, UserPosition>)
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32, // discriminator + bump + owner + vault
+                32 * 2,          // 2 encrypted u64s
+            )
+            // Withdraw amount (plaintext u64)
+            .plaintext_u64(withdraw_amount)
+            // Vault state (Enc<Mxe, VaultState>)
+            .plaintext_u128(ctx.accounts.vault.nonce)
+            .account(
+                ctx.accounts.vault.key(),
+                8 + 1 + 32 + 32, // discriminator + bump + authority + token_mint
+                32 * 3,          // 3 encrypted u64s
+            )
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            None,
+            vec![ClearPositionCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[
+                    CallbackAccount {
+                        pubkey: ctx.accounts.vault.key(),
+                        is_writable: true,
+                    },
+                    CallbackAccount {
+                        pubkey: ctx.accounts.user_position.key(),
+                        is_writable: true,
+                    },
+                ],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    #[arcium_callback(encrypted_ix = "clear_position")]
+    pub fn clear_position_callback(
+        ctx: Context<ClearPositionCallback>,
+        output: SignedComputationOutputs<ClearPositionOutput>,
+    ) -> Result<()> {
+        let tuple = match output.verify_output(
+            &ctx.accounts.cluster_account,
+            &ctx.accounts.computation_account,
+        ) {
+            Ok(ClearPositionOutput { field_0 }) => field_0,
+            Err(_) => return Err(ErrorCode::AbortedComputation.into()),
+        };
+
+        // Update user position (field_0 of the tuple)
+        ctx.accounts.user_position.position_state = tuple.field_0.ciphertexts;
+        ctx.accounts.user_position.nonce = tuple.field_0.nonce;
+
+        // Update vault state (field_1 of the tuple)
+        ctx.accounts.vault.vault_state = tuple.field_1.ciphertexts;
+        ctx.accounts.vault.nonce = tuple.field_1.nonce;
+
+        emit!(PositionClearedEvent {
+            vault: ctx.accounts.vault.key(),
+            user: ctx.accounts.user_position.owner,
+        });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // METEORA DAMM V2 CPI (Protocol PDA signs all interactions)
+    // ============================================================
+
+    /// Deploy aggregated liquidity to Meteora DAMM v2.
+    /// Protocol PDA signs the CPI, breaking user → LP linkability.
+    /// Called by vault authority after reveal_pending_deposits.
+    pub fn deploy_to_meteora(
+        ctx: Context<DeployToMeteora>,
+        liquidity_delta: u128,
+        token_a_amount_threshold: u64,
+        token_b_amount_threshold: u64,
+        sol_amount: Option<u64>,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Protocol PDA deploying {} liquidity to Meteora", liquidity_delta);
+
+        // If token_b_mint is WSOL and sol_amount is provided, wrap SOL first
+        if is_native_mint(&ctx.accounts.token_b_mint.key()) {
+            if let Some(amount) = sol_amount {
+                anchor_lang::system_program::transfer(
+                    CpiContext::new(
+                        ctx.accounts.system_program.to_account_info(),
+                        anchor_lang::system_program::Transfer {
+                            from: ctx.accounts.authority.to_account_info(),
+                            to: ctx.accounts.protocol_token_b.to_account_info(),
+                        },
+                    ),
+                    amount,
+                )?;
+
+                token::sync_native(CpiContext::new(
+                    ctx.accounts.token_b_program.to_account_info(),
+                    token::SyncNative {
+                        account: ctx.accounts.protocol_token_b.to_account_info(),
+                    },
+                ))?;
+            }
+        }
+
+        // Protocol PDA signs the CPI to Meteora
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"protocol_pda",
+            vault_key.as_ref(),
+            &[ctx.accounts.vault.bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::AddLiquidity {
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_account: ctx.accounts.protocol_token_a.to_account_info(),
+            token_b_account: ctx.accounts.protocol_token_b.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            owner: ctx.accounts.protocol_pda.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::add_liquidity(
+            cpi_ctx,
+            damm_v2::types::AddLiquidityParameters {
+                liquidity_delta,
+                token_a_amount_threshold,
+                token_b_amount_threshold,
+            },
+        )?;
+
+        emit!(DeployedToMeteoraEvent {
+            vault: ctx.accounts.vault.key(),
+            liquidity_delta,
+        });
+
+        Ok(())
+    }
+
+    /// Withdraw liquidity from Meteora DAMM v2.
+    /// Protocol PDA signs the CPI. Tokens go to protocol accounts
+    /// for distribution to users via MPC-computed shares.
+    pub fn withdraw_from_meteora(
+        ctx: Context<WithdrawFromMeteora>,
+        liquidity_delta: u128,
+        token_a_amount_threshold: u64,
+        token_b_amount_threshold: u64,
+    ) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Protocol PDA withdrawing {} liquidity from Meteora", liquidity_delta);
+
+        // Protocol PDA signs the CPI to Meteora
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"protocol_pda",
+            vault_key.as_ref(),
+            &[ctx.accounts.vault.bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::RemoveLiquidity {
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_account: ctx.accounts.protocol_token_a.to_account_info(),
+            token_b_account: ctx.accounts.protocol_token_b.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            owner: ctx.accounts.protocol_pda.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::remove_liquidity(
+            cpi_ctx,
+            damm_v2::types::RemoveLiquidityParameters {
+                liquidity_delta,
+                token_a_amount_threshold,
+                token_b_amount_threshold,
+            },
+        )?;
+
+        emit!(WithdrawnFromMeteoraEvent {
+            vault: ctx.accounts.vault.key(),
+            liquidity_delta,
+        });
+
+        Ok(())
+    }
+
+    /// Create a Meteora position for the protocol PDA.
+    /// Called once per pool to set up the protocol's position.
+    pub fn create_meteora_position(ctx: Context<CreateMeteoraPosition>) -> Result<()> {
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Creating Meteora position for protocol PDA");
+
+        // Protocol PDA signs the CPI to Meteora
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"protocol_pda",
+            vault_key.as_ref(),
+            &[ctx.accounts.vault.bump],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::CreatePosition {
+            owner: ctx.accounts.protocol_pda.to_account_info(),
+            position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            payer: ctx.accounts.authority.to_account_info(),
+            token_program: ctx.accounts.token_program.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::create_position(cpi_ctx)?;
+
+        emit!(MeteoraPositionCreatedEvent {
+            vault: ctx.accounts.vault.key(),
+            pool: ctx.accounts.pool.key(),
+        });
+
+        Ok(())
+    }
+}
+
+// ============================================================
+// ACCOUNT STRUCTURES
+// ============================================================
+
+/// Vault account holding encrypted aggregate state.
+#[account]
+#[derive(InitSpace)]
+pub struct VaultAccount {
+    pub bump: u8,
+    pub authority: Pubkey,
+    pub token_mint: Pubkey,
+    /// Encrypted vault state: [pending_deposits, total_liquidity, total_deposited]
+    pub vault_state: [[u8; 32]; 3],
+    pub nonce: u128,
+}
+
+/// User position in a vault.
+#[account]
+#[derive(InitSpace)]
+pub struct UserPositionAccount {
+    pub bump: u8,
+    pub owner: Pubkey,
+    pub vault: Pubkey,
+    /// Encrypted position: [deposited, lp_share]
+    pub position_state: [[u8; 32]; 2],
+    pub nonce: u128,
+}
+
+// ============================================================
+// COMPUTATION DEFINITION ACCOUNT CONTEXTS
+// ============================================================
+
+#[init_computation_definition_accounts("init_vault", payer)]
+#[derive(Accounts)]
+pub struct InitVaultCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account, checked by arcium program
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("init_user_position", payer)]
+#[derive(Accounts)]
+pub struct InitUserPositionCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("deposit", payer)]
+#[derive(Accounts)]
+pub struct InitDepositCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("reveal_pending_deposits", payer)]
+#[derive(Accounts)]
+pub struct InitRevealPendingCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("record_liquidity", payer)]
+#[derive(Accounts)]
+pub struct InitRecordLiquidityCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("compute_withdrawal", payer)]
+#[derive(Accounts)]
+pub struct InitWithdrawCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("get_user_position", payer)]
+#[derive(Accounts)]
+pub struct InitGetPositionCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+#[init_computation_definition_accounts("clear_position", payer)]
+#[derive(Accounts)]
+pub struct InitClearPositionCompDef<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+    #[account(mut)]
+    /// CHECK: comp_def_account
+    pub comp_def_account: UncheckedAccount<'info>,
+    pub arcium_program: Program<'info, Arcium>,
+    pub system_program: Program<'info, System>,
+}
+
+// ============================================================
+// QUEUE COMPUTATION ACCOUNT CONTEXTS
+// ============================================================
+
+#[queue_computation_accounts("init_vault", authority)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct CreateVault<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_VAULT))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    /// Token mint for this vault
+    pub token_mint: Account<'info, anchor_spl::token::Mint>,
+
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = 8 + VaultAccount::INIT_SPACE,
+        seeds = [b"vault", token_mint.key().as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[queue_computation_accounts("init_user_position", user)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct CreateUserPosition<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = user,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_USER_POSITION))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + UserPositionAccount::INIT_SPACE,
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump,
+    )]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[queue_computation_accounts("deposit", depositor)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct Deposit<'info> {
+    #[account(mut)]
+    pub depositor: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = depositor,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_DEPOSIT))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut, has_one = token_mint)]
+    pub vault: Box<Account<'info, VaultAccount>>,
+
+    #[account(
+        mut,
+        seeds = [b"position", vault.key().as_ref(), depositor.key().as_ref()],
+        bump = user_position.bump,
+        constraint = user_position.owner == depositor.key() @ ErrorCode::Unauthorized,
+    )]
+    pub user_position: Box<Account<'info, UserPositionAccount>>,
+
+    /// Token mint for this vault
+    pub token_mint: Box<Account<'info, anchor_spl::token::Mint>>,
+
+    /// User's token account (source)
+    #[account(
+        mut,
+        token::mint = token_mint,
+        token::authority = depositor,
+    )]
+    pub user_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// Vault's token account (destination)
+    #[account(
+        mut,
+        token::mint = token_mint,
+        token::authority = vault,
+    )]
+    pub vault_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    pub token_program: Program<'info, anchor_spl::token::Token>,
+}
+
+#[queue_computation_accounts("reveal_pending_deposits", authority)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct RevealPendingDeposits<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_REVEAL_PENDING))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[queue_computation_accounts("record_liquidity", authority)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct RecordLiquidity<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_RECORD_LIQUIDITY))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut, has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[queue_computation_accounts("compute_withdrawal", user)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct Withdraw<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = user,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_WITHDRAW))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut)]
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump = user_position.bump,
+    )]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[queue_computation_accounts("get_user_position", user)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct GetUserPosition<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = user,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_GET_POSITION))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    /// Vault account for verifying position
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump = user_position.bump,
+    )]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[queue_computation_accounts("clear_position", authority)]
+#[derive(Accounts)]
+#[instruction(computation_offset: u64)]
+pub struct ClearPosition<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CLEAR_POSITION))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut, has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(mut)]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+// ============================================================
+// CALLBACK ACCOUNT CONTEXTS
+// ============================================================
+
+#[callback_accounts("init_vault")]
+#[derive(Accounts)]
+pub struct InitVaultCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_VAULT))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    #[account(mut)]
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[callback_accounts("init_user_position")]
+#[derive(Accounts)]
+pub struct InitUserPositionCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_USER_POSITION))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    #[account(mut)]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[callback_accounts("deposit")]
+#[derive(Accounts)]
+pub struct DepositCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_DEPOSIT))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    #[account(mut)]
+    pub vault: Account<'info, VaultAccount>,
+    #[account(mut)]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[callback_accounts("reveal_pending_deposits")]
+#[derive(Accounts)]
+pub struct RevealPendingDepositsCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_REVEAL_PENDING))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[callback_accounts("record_liquidity")]
+#[derive(Accounts)]
+pub struct RecordLiquidityCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_RECORD_LIQUIDITY))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    #[account(mut)]
+    pub vault: Account<'info, VaultAccount>,
+}
+
+#[callback_accounts("compute_withdrawal")]
+#[derive(Accounts)]
+pub struct ComputeWithdrawalCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_WITHDRAW))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    pub vault: Account<'info, VaultAccount>,
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[callback_accounts("get_user_position")]
+#[derive(Accounts)]
+pub struct GetUserPositionCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_GET_POSITION))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+}
+
+#[callback_accounts("clear_position")]
+#[derive(Accounts)]
+pub struct ClearPositionCallback<'info> {
+    pub arcium_program: Program<'info, Arcium>,
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_CLEAR_POSITION))]
+    pub comp_def_account: Account<'info, ComputationDefinitionAccount>,
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Account<'info, MXEAccount>,
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+    #[account(address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Account<'info, Cluster>,
+    #[account(address = ::anchor_lang::solana_program::sysvar::instructions::ID)]
+    /// CHECK: instructions_sysvar
+    pub instructions_sysvar: AccountInfo<'info>,
+    #[account(mut)]
+    pub vault: Account<'info, VaultAccount>,
+    #[account(mut)]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+// ============================================================
+// METEORA CPI ACCOUNT STRUCTURES
+// ============================================================
+
+/// Accounts for deploying liquidity to Meteora via Protocol PDA
+#[derive(Accounts)]
+pub struct DeployToMeteora<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Protocol PDA that owns the Meteora position
+    /// CHECK: Derived from vault seeds
+    #[account(
+        seeds = [b"protocol_pda", vault.key().as_ref()],
+        bump,
+    )]
+    pub protocol_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// Protocol's token A account (source)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub protocol_token_a: UncheckedAccount<'info>,
+
+    /// Protocol's token B account (source)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub protocol_token_b: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// Position NFT account (proves ownership)
+    /// CHECK: Validated by DAMM v2 program
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Accounts for withdrawing liquidity from Meteora via Protocol PDA
+#[derive(Accounts)]
+pub struct WithdrawFromMeteora<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Protocol PDA that owns the Meteora position
+    /// CHECK: Derived from vault seeds
+    #[account(
+        seeds = [b"protocol_pda", vault.key().as_ref()],
+        bump,
+    )]
+    pub protocol_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// Protocol's token A account (receives tokens)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub protocol_token_a: UncheckedAccount<'info>,
+
+    /// Protocol's token B account (receives tokens)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub protocol_token_b: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// Position NFT account (proves ownership)
+    /// CHECK: Validated by DAMM v2 program
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Accounts for creating a Meteora position for Protocol PDA
+#[derive(Accounts)]
+pub struct CreateMeteoraPosition<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Protocol PDA that will own the Meteora position
+    /// CHECK: Derived from vault seeds
+    #[account(
+        seeds = [b"protocol_pda", vault.key().as_ref()],
+        bump,
+    )]
+    pub protocol_pda: UncheckedAccount<'info>,
+
+    /// Position NFT mint (new keypair, signer)
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut, signer)]
+    pub position_nft_mint: UncheckedAccount<'info>,
+
+    /// Position NFT account (PDA derived from mint)
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Must be Token-2022 program
+    #[account(address = token_2022_program_id())]
+    pub token_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+// ============================================================
+// EVENTS
+// ============================================================
+
+#[event]
+pub struct VaultCreatedEvent {
+    pub vault: Pubkey,
+    pub token_mint: Pubkey,
+}
+
+#[event]
+pub struct DepositEvent {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+}
+
+#[event]
+pub struct PendingDepositsRevealedEvent {
+    pub vault: Pubkey,
+    pub total_pending: u64,
+}
+
+#[event]
+pub struct LiquidityRecordedEvent {
+    pub vault: Pubkey,
+}
+
+#[event]
+pub struct WithdrawEvent {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+    pub encrypted_amount: [u8; 32],
+    pub nonce: u128,
+}
+
+#[event]
+pub struct UserPositionEvent {
+    pub encrypted_deposited: [u8; 32],
+    pub encrypted_lp_share: [u8; 32],
+    pub nonce: u128,
+}
+
+#[event]
+pub struct DeployedToMeteoraEvent {
+    pub vault: Pubkey,
+    pub liquidity_delta: u128,
+}
+
+#[event]
+pub struct WithdrawnFromMeteoraEvent {
+    pub vault: Pubkey,
+    pub liquidity_delta: u128,
+}
+
+#[event]
+pub struct MeteoraPositionCreatedEvent {
+    pub vault: Pubkey,
+    pub pool: Pubkey,
+}
+
+#[event]
+pub struct PositionClearedEvent {
+    pub vault: Pubkey,
+    pub user: Pubkey,
+}
+
+// ============================================================
+// ERRORS
+// ============================================================
+
+#[error_code]
+pub enum ErrorCode {
+    #[msg("The computation was aborted")]
+    AbortedComputation,
+    #[msg("Cluster not set")]
+    ClusterNotSet,
+    #[msg("Unauthorized")]
+    Unauthorized,
+}
