@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Devnet + Localnet COMPLETE (29/29 tests pass on both)
+**Phase:** Localnet 31/31 passing (ephemeral wallet auth + SOL-paired pools). Devnet needs redeploy.
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -33,7 +33,10 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Added:** `fund_relay`, `relay_transfer_to_destination` instructions + tests
 - **Added:** `create_pool_via_relay`, `create_customizable_pool_via_relay`, `create_meteora_position` instructions + tests
 - **Added:** `deposit_to_meteora_damm_v2`, `withdraw_from_meteora_damm_v2` instructions + tests
-- **Localnet + Devnet (2026-01-30):** All 29 tests pass on `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
+- **Added:** `EphemeralWalletAccount` PDA + `register_ephemeral_wallet`, `close_ephemeral_wallet` instructions
+- **Changed:** 5 Meteora CPI instructions now use per-operation ephemeral wallet PDA auth instead of authority signer
+- **Changed:** All Meteora pool tests now use SOL-paired pools (SPL token + NATIVE_MINT/WSOL) instead of SPL/SPL pairs
+- **Localnet (2026-01-30):** 31/31 tests passing with ephemeral wallet auth + SOL-paired pools
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -201,22 +204,26 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
                                       → relay_transfer_to_destination → Ephemeral wallet
 ```
 
-### Full Transaction Flow (11 Steps)
+### Full Transaction Flow (13 Steps)
 
 ```
- 1. [user]       mixer.transact(proof)           -- deposit SOL/SPL to mixer
- 2. [relayer]    mixer.transact(proof)           -- withdraw to ephemeral wallet
- 3. [ephemeral]  zodiac.deposit(encrypted_amt)   -- deposit to vault
- 4. [authority]  zodiac.reveal_pending_deposits() -- Arcium reveals aggregate
- 5. [authority]  zodiac.fund_relay(idx, amount)   -- vault → relay PDA
- 6. [authority]  zodiac.deposit_to_meteora(...)   -- relay PDA → Meteora add_liquidity
- 7. [authority]  zodiac.record_liquidity(delta)   -- record in Arcium
+ 1. [user]       mixer.transact(proof)              -- deposit SOL/SPL to mixer
+ 2. [relayer]    mixer.transact(proof)              -- withdraw to ephemeral wallet
+ 3. [authority]  zodiac.register_ephemeral_wallet() -- register ephemeral wallet PDA
+ 4. [ephemeral]  zodiac.deposit(encrypted_amt)      -- deposit to vault
+ 5. [authority]  zodiac.reveal_pending_deposits()    -- Arcium reveals aggregate
+ 6. [authority]  zodiac.fund_relay(idx, amount)      -- vault → relay PDA
+ 7. [ephemeral]  zodiac.deposit_to_meteora(...)      -- relay PDA → Meteora add_liquidity
+ 8. [authority]  zodiac.record_liquidity(delta)      -- record in Arcium
  --- withdrawal ---
- 8. [ephemeral]  zodiac.withdraw(pubkey, nonce)   -- Arcium computes share
- 9. [authority]  zodiac.withdraw_from_meteora(...) -- relay removes liquidity
-10. [authority]  zodiac.relay_transfer_to_dest()  -- relay → ephemeral wallet
-11. [authority]  zodiac.clear_position(amount)    -- zero Arcium state
+ 9. [ephemeral]  zodiac.withdraw(pubkey, nonce)      -- Arcium computes share
+10. [ephemeral]  zodiac.withdraw_from_meteora(...)   -- relay removes liquidity
+11. [authority]  zodiac.relay_transfer_to_dest()     -- relay → ephemeral wallet
+12. [authority]  zodiac.clear_position(amount)       -- zero Arcium state
+13. [authority]  zodiac.close_ephemeral_wallet()     -- close PDA, reclaim rent
 ```
+
+**Per-operation ephemeral wallet pattern:** Each Meteora CPI operation (steps 7, 10) uses a fresh ephemeral wallet. The authority registers the wallet PDA (step 3), the ephemeral wallet executes one CPI, then the authority closes the PDA (step 13) to reclaim rent. Next operation gets a brand new wallet — no cross-operation linkability.
 
 ### What's Hidden vs Visible
 
@@ -262,7 +269,13 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
 | `fund_relay` | Transfer tokens from authority to relay PDA's token account |
 | `relay_transfer_to_destination` | Transfer tokens from relay PDA to destination (e.g., ephemeral wallet) |
 
-**Meteora CPI (5):**
+**Ephemeral Wallet Management (2):**
+| Instruction | Purpose |
+|------------|---------|
+| `register_ephemeral_wallet` | Register an ephemeral wallet PDA (authority only) |
+| `close_ephemeral_wallet` | Close an ephemeral wallet PDA, return rent to authority |
+
+**Meteora CPI (5) — require registered ephemeral wallet:**
 | Instruction | Purpose |
 |------------|---------|
 | `create_pool_via_relay` | Create Meteora pool via relay PDA (config-based) |
@@ -294,6 +307,12 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
 **UserPosition** (2 encrypted u64s):
 - `deposited` — user's total deposited amount
 - `liquidity_share` — user's share of liquidity
+
+**EphemeralWalletAccount** (PDA: `[b"ephemeral", vault, wallet]`):
+- `bump` — PDA bump seed
+- `vault` — which vault this belongs to
+- `wallet` — the ephemeral wallet pubkey
+- **Per-operation pattern:** Each Meteora CPI gets a fresh ephemeral wallet. Authority registers the PDA before the CPI, ephemeral wallet signs the CPI, then authority closes the PDA to reclaim rent. No `is_active` flag — existence of the PDA is the only check. A new wallet keypair is generated for every operation, preventing cross-operation linkability.
 
 ### Three-Instruction Pattern (per MPC operation)
 
@@ -465,6 +484,8 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 14. **GitHub URLs work fine for localnet** - ARX Docker nodes CAN reach `raw.githubusercontent.com`. The Docker network issue was specific to catbox.moe, not external URLs in general. No need to switch to local HTTP server for localnet testing.
 15. **Kill zombie processes before re-running tests** - If `arcium test` is interrupted or run multiple times, stale mocha/validator/arcium processes pile up as zombies. Fix: `docker restart zodiac-dev` then `rm -rf /app/.anchor/test-ledger` before the next run.
 16. **Localnet test procedure** - Clean run: `docker restart zodiac-dev` → `docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger && cd /app && arcium test"`. This ensures no zombie processes, fresh ledger, full build + IDL regen, and single test runner.
+17. **Blockhash retry patch** - On localnet, after heavy MPC activity (8 comp defs + 8 computations), the validator lags and blockhashes expire between fetch and confirmation. The test file patches `provider.sendAndConfirm` to auto-retry up to 3 times on "Blockhash not found" errors with a 2s delay. This covers all `.rpc()` calls since Anchor routes them through `provider.sendAndConfirm`. Eliminated all transient blockhash failures.
+18. **SOL-paired pools** - Meteora DAMM v2 pools should use NATIVE_MINT (WSOL) as one of the token pair. Fund relay WSOL accounts by transferring SOL + `createSyncNativeInstruction()` instead of `mintTo` + `fundRelay`. The on-chain `deposit_to_meteora_damm_v2` has built-in SOL wrapping via `sol_amount` parameter.
 
 ## Localnet Circuit Hosting (NOT NEEDED — GitHub URLs work)
 
@@ -492,9 +513,9 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 ## Test Results (2026-01-30)
 
-### Localnet (29/29 passing)
+### Localnet (31/31 passing)
 
-**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
+**Program:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K` (localnet)
 
 | # | Test | Status |
 |---|------|--------|
@@ -519,20 +540,25 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 19 | fails relay transfer with invalid relay index | PASS |
 | 20 | funds a relay PDA token account | PASS |
 | 21 | fails fund_relay with wrong authority | PASS |
-| 22 | creates a customizable pool via relay PDA | PASS |
-| 23 | fails create_customizable_pool with wrong authority | PASS |
+| 22 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
+| 23 | fails create_customizable_pool with unregistered ephemeral wallet | PASS |
 | 24 | fails create_customizable_pool with invalid relay index | PASS |
 | 25 | creates a Meteora position for relay PDA | PASS |
-| 26 | deposits liquidity to Meteora via relay PDA | PASS |
-| 27 | withdraws liquidity from Meteora via relay PDA | PASS |
-| 28 | fails deposit_to_meteora with wrong authority | PASS |
-| 29 | fails withdraw_from_meteora with wrong authority | PASS |
+| 26 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
+| 27 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
+| 28 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
+| 29 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
+| 30 | registers an ephemeral wallet | PASS |
+| 31 | fails register with wrong authority | PASS |
+| 32 | closes an ephemeral wallet | PASS |
 
-### Devnet (29/29 passing)
+**Note:** Tests 22-29 use SOL-paired pools (SPL token + NATIVE_MINT/WSOL). Tests 23, 28, 29 verify ephemeral wallet PDA auth (unregistered wallets fail with AccountNotInitialized).
+
+### Devnet (needs redeploy)
 
 **Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (cluster 456)
 
-Same 29 tests pass on devnet (comp defs skip if already initialized). Transient RPC 403 rate limits may cause sporadic failures on individual runs — all tests have passed across runs.
+Previous 29/29 tests passed before ephemeral wallet auth + SOL-paired pool changes. Needs `arcium deploy` to update program + re-test.
 
 ## Arcium Diagnostic Commands
 

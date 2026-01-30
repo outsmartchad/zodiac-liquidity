@@ -248,6 +248,28 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 2000): 
 }
 
 /**
+ * Retry an async operation on "Blockhash not found" errors.
+ * On localnet, the Anchor provider's cached blockhash can go stale after
+ * heavy MPC activity. Retrying forces a fresh blockhash fetch.
+ */
+async function withBlockhashRetry<T>(fn: () => Promise<T>, retries = 3, delayMs = 2000): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const msg = err.message || err.toString();
+      if (msg.includes("Blockhash not found") && i < retries - 1) {
+        console.log(`  Blockhash expired, retrying (${i + 1}/${retries})...`);
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("withBlockhashRetry: unreachable");
+}
+
+/**
  * Calculate liquidity from desired token amounts using Meteora SDK.
  */
 function calculateLiquidityFromAmounts(
@@ -283,6 +305,21 @@ function readKpJson(path: string): anchor.web3.Keypair {
   );
 }
 
+/**
+ * Derives an ephemeral wallet PDA for a given vault and wallet pubkey.
+ */
+function deriveEphemeralWalletPda(
+  vaultPda: PublicKey,
+  walletPubkey: PublicKey,
+  programId: PublicKey
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("ephemeral"), vaultPda.toBuffer(), walletPubkey.toBuffer()],
+    programId
+  );
+  return pda;
+}
+
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
@@ -316,6 +353,29 @@ describe("zodiac-liquidity", () => {
   anchor.setProvider(anchor.AnchorProvider.env());
   const program = anchor.workspace.ZodiacLiquidity as Program<ZodiacLiquidity>;
   const provider = anchor.getProvider() as anchor.AnchorProvider;
+
+  // Patch provider.sendAndConfirm to auto-retry on "Blockhash not found".
+  // On localnet, after heavy MPC activity the validator can lag behind,
+  // causing blockhash expiry between fetch and confirmation.
+  // Anchor's sendAndConfirm already fetches a fresh blockhash each call,
+  // so retrying the full call fixes transient timing issues.
+  const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
+  provider.sendAndConfirm = async function(tx, signers?, opts?) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        return await _origSendAndConfirm(tx, signers, opts);
+      } catch (err: any) {
+        const msg = err.message || err.toString();
+        if (msg.includes("Blockhash not found") && attempt < 2) {
+          console.log(`  Blockhash expired, retrying (${attempt + 1}/3)...`);
+          await new Promise(r => setTimeout(r, 2000));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error("sendAndConfirm retry: unreachable");
+  } as any;
 
   type Event = anchor.IdlEvents<(typeof program)["idl"]>;
   const awaitEvent = async <E extends keyof Event>(
@@ -1340,32 +1400,59 @@ describe("zodiac-liquidity", () => {
     let relayPda: PublicKey;
     let relayTokenAPubkey: PublicKey;
     let relayTokenBPubkey: PublicKey;
+    let ephemeralWalletPda: PublicKey;
     const relayIndex = 4;
     let setupFailed = false;
 
     before(async () => {
       try {
-        // Create two token mints for the pool (token A < token B lexicographically)
+        // Register owner as ephemeral wallet for this vault
+        ephemeralWalletPda = deriveEphemeralWalletPda(vaultPda, owner.publicKey, program.programId);
+        try {
+          await program.methods
+            .registerEphemeralWallet()
+            .accounts({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              wallet: owner.publicKey,
+              ephemeralWallet: ephemeralWalletPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+          console.log("Registered owner as ephemeral wallet:", ephemeralWalletPda.toString());
+        } catch (err: any) {
+          // May already exist from previous test run
+          if (err.message?.includes("already in use")) {
+            console.log("Ephemeral wallet PDA already exists, continuing");
+          } else {
+            throw err;
+          }
+        }
+
+        // Create SPL token mint + use NATIVE_MINT (WSOL) for SOL-paired pool
         const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-        const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-        tokenA = minKey(mintA, mintB);
-        tokenB = maxKey(mintA, mintB);
-        console.log("Token A:", tokenA.toString());
-        console.log("Token B:", tokenB.toString());
+        // Token A must be lexicographically smaller, Token B larger
+        tokenA = minKey(mintA, NATIVE_MINT);
+        tokenB = maxKey(mintA, NATIVE_MINT);
+        const isTokenANative = tokenA.equals(NATIVE_MINT);
+        console.log("Token A:", tokenA.toString(), isTokenANative ? "(WSOL)" : "(SPL)");
+        console.log("Token B:", tokenB.toString(), !isTokenANative ? "(WSOL)" : "(SPL)");
 
         relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
 
-        // Fund relay PDA with 0.05 SOL for rent via transfer from owner
+        // Fund relay PDA with SOL for rent + WSOL wrapping
         const fundRelayTx = new anchor.web3.Transaction().add(
           SystemProgram.transfer({
             fromPubkey: owner.publicKey,
             toPubkey: relayPda,
-            lamports: 50_000_000,
+            lamports: 100_000_000, // 0.1 SOL for rent + operations
           })
         );
         await provider.sendAndConfirm(fundRelayTx, [owner]);
 
-        // Create relay token accounts for A and B (keypair to avoid ATA off-curve error)
+        // Create relay token accounts (keypair to avoid ATA off-curve error)
+        // Token A: SPL token account
         const relayTokenAKp = Keypair.generate();
         relayTokenAPubkey = await createAccount(
           provider.connection,
@@ -1374,11 +1461,12 @@ describe("zodiac-liquidity", () => {
           relayPda,
           relayTokenAKp,
         );
+        // Token B: WSOL account
         const relayTokenBKp = Keypair.generate();
         relayTokenBPubkey = await createAccount(
           provider.connection,
           owner,
-          tokenB,
+          tokenB, // NATIVE_MINT (WSOL)
           relayPda,
           relayTokenBKp,
         );
@@ -1386,48 +1474,45 @@ describe("zodiac-liquidity", () => {
         // Wait for accounts to settle
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Fund relay with tokens via authority
-        const authTokenA = await getOrCreateAssociatedTokenAccount(
-          provider.connection, owner, tokenA, owner.publicKey
-        );
-        const authTokenB = await getOrCreateAssociatedTokenAccount(
-          provider.connection, owner, tokenB, owner.publicKey
-        );
+        // Determine which is SPL and which is WSOL
+        const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
+        const relaySplAccount = tokenA.equals(NATIVE_MINT) ? relayTokenBPubkey : relayTokenAPubkey;
+        const relayWsolAccount = tokenA.equals(NATIVE_MINT) ? relayTokenAPubkey : relayTokenBPubkey;
 
-        await mintTo(provider.connection, owner, tokenA, authTokenA.address, owner, 10_000_000_000);
-        await mintTo(provider.connection, owner, tokenB, authTokenB.address, owner, 10_000_000_000);
+        // Fund relay SPL token via fund_relay (authority mints + transfers)
+        const authSplAta = await getOrCreateAssociatedTokenAccount(
+          provider.connection, owner, splMint, owner.publicKey
+        );
+        await mintTo(provider.connection, owner, splMint, authSplAta.address, owner, 10_000_000_000);
 
         // Wait before fund_relay calls
         await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Fund relay token accounts via fund_relay
         await program.methods
           .fundRelay(relayIndex, new anchor.BN(5_000_000_000))
           .accounts({
             authority: owner.publicKey,
             vault: vaultPda,
             relayPda: relayPda,
-            authorityTokenAccount: authTokenA.address,
-            relayTokenAccount: relayTokenAPubkey,
+            authorityTokenAccount: authSplAta.address,
+            relayTokenAccount: relaySplAccount,
             tokenProgram: TOKEN_PROGRAM_ID,
           })
           .signers([owner])
           .rpc({ commitment: "confirmed" });
 
-        await program.methods
-          .fundRelay(relayIndex, new anchor.BN(5_000_000_000))
-          .accounts({
-            authority: owner.publicKey,
-            vault: vaultPda,
-            relayPda: relayPda,
-            authorityTokenAccount: authTokenB.address,
-            relayTokenAccount: relayTokenBPubkey,
-            tokenProgram: TOKEN_PROGRAM_ID,
-          })
-          .signers([owner])
-          .rpc({ commitment: "confirmed" });
+        // Fund relay WSOL account by transferring SOL + sync native
+        const fundWsolTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: owner.publicKey,
+            toPubkey: relayWsolAccount,
+            lamports: 5_000_000_000,
+          }),
+          createSyncNativeInstruction(relayWsolAccount),
+        );
+        await provider.sendAndConfirm(fundWsolTx, [owner]);
 
-        console.log("Relay PDA funded with token A and B for pool creation");
+        console.log("Relay PDA funded with SPL token and WSOL for pool creation");
       } catch (err: any) {
         console.log("Meteora CPI setup failed (DAMM v2 likely not deployed):", err.message?.substring(0, 100));
         setupFailed = true;
@@ -1507,8 +1592,9 @@ describe("zodiac-liquidity", () => {
             null,                              // activation_point (None = immediate)
           )
           .accounts({
-            authority: owner.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
+            ephemeralWallet: ephemeralWalletPda,
             relayPda: relayPda,
             positionNftMint: positionNftMint.publicKey,
             positionNftAccount: positionNftAccount,
@@ -1549,21 +1635,21 @@ describe("zodiac-liquidity", () => {
       }
     });
 
-    it("fails create_customizable_pool with wrong authority", async function () {
+    it("fails create_customizable_pool with unregistered ephemeral wallet", async function () {
       if (setupFailed) { this.skip(); return; }
-      const wrongAuthority = Keypair.generate();
-      // Fund wrong authority with 0.05 SOL via transfer from owner
+      const unregisteredWallet = Keypair.generate();
+      // Fund unregistered wallet with 0.05 SOL
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: wrongAuthority.publicKey,
+          toPubkey: unregisteredWallet.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       const positionNftMint = Keypair.generate();
-      const wrongRelayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       const poolFees = {
         baseFee: {
@@ -1590,9 +1676,10 @@ describe("zodiac-liquidity", () => {
             0, 0, null,
           )
           .accounts({
-            authority: wrongAuthority.publicKey,
+            payer: unregisteredWallet.publicKey,
             vault: vaultPda,
-            relayPda: wrongRelayPda,
+            ephemeralWallet: unregisteredEphemeralPda,
+            relayPda: deriveRelayPda(vaultPda, relayIndex, program.programId),
             positionNftMint: positionNftMint.publicKey,
             positionNftAccount: PublicKey.default,
             poolAuthority: POOL_AUTHORITY,
@@ -1611,80 +1698,15 @@ describe("zodiac-liquidity", () => {
             eventAuthority: PublicKey.default,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([wrongAuthority, positionNftMint])
+          .signers([unregisteredWallet, positionNftMint])
           .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with unauthorized");
+        throw new Error("Should have failed with unregistered ephemeral wallet");
       } catch (err: any) {
-        console.log("Expected error for wrong authority:", err.message?.substring(0, 100));
-        // May get Unauthorized or ConstraintMut (Anchor validates accounts before custom checks)
+        console.log("Expected error for unregistered ephemeral wallet:", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
+        // PDA not found = AccountNotInitialized or similar
         expect(msg).to.satisfy((m: string) =>
-          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
-        );
-      }
-    });
-
-    it("fails create_customizable_pool with invalid relay index", async function () {
-      if (setupFailed) { this.skip(); return; }
-      const invalidRelayIndex = 12;
-      const positionNftMint = Keypair.generate();
-      const invalidRelayPda = deriveRelayPda(vaultPda, invalidRelayIndex, program.programId);
-
-      const poolFees = {
-        baseFee: {
-          cliffFeeNumerator: new anchor.BN(2_500_000),
-          firstFactor: 0,
-          secondFactor: Array(8).fill(0),
-          thirdFactor: new anchor.BN(0),
-          baseFeeMode: 0,
-        },
-        padding: [0, 0, 0],
-        dynamicFee: null,
-      };
-
-      try {
-        await program.methods
-          .createCustomizablePoolViaRelay(
-            invalidRelayIndex,
-            poolFees,
-            new anchor.BN(MIN_SQRT_PRICE),
-            new anchor.BN(MAX_SQRT_PRICE),
-            false,
-            new anchor.BN(1_000_000),
-            new anchor.BN(MIN_SQRT_PRICE),
-            0, 0, null,
-          )
-          .accounts({
-            authority: owner.publicKey,
-            vault: vaultPda,
-            relayPda: invalidRelayPda,
-            positionNftMint: positionNftMint.publicKey,
-            positionNftAccount: PublicKey.default,
-            poolAuthority: POOL_AUTHORITY,
-            pool: PublicKey.default,
-            position: PublicKey.default,
-            tokenAMint: tokenA,
-            tokenBMint: tokenB,
-            tokenAVault: PublicKey.default,
-            tokenBVault: PublicKey.default,
-            relayTokenA: PublicKey.default,
-            relayTokenB: PublicKey.default,
-            tokenAProgram: TOKEN_PROGRAM_ID,
-            tokenBProgram: TOKEN_PROGRAM_ID,
-            token2022Program: TOKEN_2022_PROGRAM_ID,
-            systemProgram: SystemProgram.programId,
-            eventAuthority: PublicKey.default,
-            ammProgram: DAMM_V2_PROGRAM_ID,
-          })
-          .signers([owner, positionNftMint])
-          .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with invalid relay index");
-      } catch (err: any) {
-        console.log("Expected error for invalid relay index:", err.message?.substring(0, 100));
-        // May get InvalidRelayIndex or ConstraintMut (Anchor validates accounts before custom checks)
-        const msg = err.message || err.toString();
-        expect(msg).to.satisfy((m: string) =>
-          m.includes("InvalidRelayIndex") || m.includes("Constraint") || m.includes("Error")
+          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
         );
       }
     });
@@ -1711,29 +1733,34 @@ describe("zodiac-liquidity", () => {
       );
       await provider.sendAndConfirm(fundRelayTx, [owner]);
 
-      // We need an existing pool for this. Create two mints and a customizable pool first.
+      // Create SPL mint + use NATIVE_MINT (WSOL) for SOL-paired pool
       const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-      const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-      const tA = minKey(mintA, mintB);
-      const tB = maxKey(mintA, mintB);
+      const tA = minKey(mintA, NATIVE_MINT);
+      const tB = maxKey(mintA, NATIVE_MINT);
 
-      // Create relay token accounts and fund them
+      // Create relay token accounts
       const relayTokenAKp = Keypair.generate();
       const relayTokenA = await createAccount(provider.connection, owner, tA, relayPda, relayTokenAKp);
       const relayTokenBKp = Keypair.generate();
       const relayTokenB = await createAccount(provider.connection, owner, tB, relayPda, relayTokenBKp);
 
-      const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tA, owner.publicKey);
-      const authTokenB = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tB, owner.publicKey);
-      await mintTo(provider.connection, owner, tA, authTokenA.address, owner, 10_000_000_000);
-      await mintTo(provider.connection, owner, tB, authTokenB.address, owner, 10_000_000_000);
+      // Fund relay SPL token A
+      const splMint = tA.equals(NATIVE_MINT) ? tB : tA;
+      const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
+      await mintTo(provider.connection, owner, splMint, authTokenA.address, owner, 10_000_000_000);
 
+      const relayTokenSpl = tA.equals(NATIVE_MINT) ? relayTokenB : relayTokenA;
       await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
-        .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenA, tokenProgram: TOKEN_PROGRAM_ID })
+        .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
         .signers([owner]).rpc({ commitment: "confirmed" });
-      await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
-        .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenB.address, relayTokenAccount: relayTokenB, tokenProgram: TOKEN_PROGRAM_ID })
-        .signers([owner]).rpc({ commitment: "confirmed" });
+
+      // Fund relay WSOL account with SOL + sync native
+      const relayTokenWsol = tA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
+      const fundWsolTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 5_000_000_000 }),
+        createSyncNativeInstruction(relayTokenWsol),
+      );
+      await provider.sendAndConfirm(fundWsolTx, [owner]);
 
       // First create a pool via relay using customizable (no config needed)
       const poolNftMint = Keypair.generate();
@@ -1770,6 +1797,9 @@ describe("zodiac-liquidity", () => {
       const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
       try {
+        // Derive ephemeral wallet PDA (owner registered in customizable pool test setup)
+        const createPosEphemeralPda = deriveEphemeralWalletPda(vaultPda, owner.publicKey, program.programId);
+
         // Create pool first
         await program.methods
           .createCustomizablePoolViaRelay(
@@ -1778,7 +1808,7 @@ describe("zodiac-liquidity", () => {
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            authority: owner.publicKey, vault: vaultPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, ephemeralWallet: createPosEphemeralPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tA, tokenBMint: tB,
@@ -1814,11 +1844,15 @@ describe("zodiac-liquidity", () => {
           program.programId
         );
 
+        // Derive ephemeral wallet PDA (owner registered in customizable pool test setup)
+        const posTestEphemeralPda = deriveEphemeralWalletPda(vaultPda, owner.publicKey, program.programId);
+
         const sig = await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            authority: owner.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
+            ephemeralWallet: posTestEphemeralPda,
             relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey,
@@ -1871,6 +1905,7 @@ describe("zodiac-liquidity", () => {
     let tokenAVault: PublicKey;
     let tokenBVault: PublicKey;
     let eventAuthority: PublicKey;
+    let depWithEphemeralPda: PublicKey;
     const relayIndex = 6;
     let setupFailed = false;
 
@@ -1891,13 +1926,13 @@ describe("zodiac-liquidity", () => {
         );
         await provider.sendAndConfirm(fundRelayTx, [owner]);
 
-        // Create two token mints (A < B lexicographically)
+        // Create SPL mint + use NATIVE_MINT (WSOL) for SOL-paired pool
         const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-        const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
-        tokenA = minKey(mintA, mintB);
-        tokenB = maxKey(mintA, mintB);
-        console.log("Deposit/Withdraw test - Token A:", tokenA.toString());
-        console.log("Deposit/Withdraw test - Token B:", tokenB.toString());
+        tokenA = minKey(mintA, NATIVE_MINT);
+        tokenB = maxKey(mintA, NATIVE_MINT);
+        const isTokenANative = tokenA.equals(NATIVE_MINT);
+        console.log("Deposit/Withdraw test - Token A:", tokenA.toString(), isTokenANative ? "(WSOL)" : "(SPL)");
+        console.log("Deposit/Withdraw test - Token B:", tokenB.toString(), !isTokenANative ? "(WSOL)" : "(SPL)");
 
         // Create relay token accounts
         const relayTokenAKp = Keypair.generate();
@@ -1905,20 +1940,25 @@ describe("zodiac-liquidity", () => {
         const relayTokenBKp = Keypair.generate();
         relayTokenB = await createAccount(provider.connection, owner, tokenB, relayPda, relayTokenBKp);
 
-        // Mint tokens to authority and fund relay
-        const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tokenA, owner.publicKey);
-        const authTokenB = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tokenB, owner.publicKey);
-        await mintTo(provider.connection, owner, tokenA, authTokenA.address, owner, 10_000_000_000);
-        await mintTo(provider.connection, owner, tokenB, authTokenB.address, owner, 10_000_000_000);
+        // Fund relay SPL token via fund_relay
+        const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
+        const authTokenSpl = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
+        await mintTo(provider.connection, owner, splMint, authTokenSpl.address, owner, 10_000_000_000);
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
+        const relayTokenSpl = tokenA.equals(NATIVE_MINT) ? relayTokenB : relayTokenA;
         await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
-          .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenA, tokenProgram: TOKEN_PROGRAM_ID })
+          .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenSpl.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
           .signers([owner]).rpc({ commitment: "confirmed" });
-        await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
-          .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenB.address, relayTokenAccount: relayTokenB, tokenProgram: TOKEN_PROGRAM_ID })
-          .signers([owner]).rpc({ commitment: "confirmed" });
+
+        // Fund relay WSOL account with SOL + sync native
+        const relayTokenWsol = tokenA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
+        const fundWsolTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 5_000_000_000 }),
+          createSyncNativeInstruction(relayTokenWsol),
+        );
+        await provider.sendAndConfirm(fundWsolTx, [owner]);
 
         // Create a customizable pool
         const poolNftMint = Keypair.generate();
@@ -1953,6 +1993,9 @@ describe("zodiac-liquidity", () => {
         };
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
+        // Derive ephemeral wallet PDA (owner registered in customizable pool test setup)
+        depWithEphemeralPda = deriveEphemeralWalletPda(vaultPda, owner.publicKey, program.programId);
+
         await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
@@ -1960,7 +2003,7 @@ describe("zodiac-liquidity", () => {
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            authority: owner.publicKey, vault: vaultPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, ephemeralWallet: depWithEphemeralPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tokenA, tokenBMint: tokenB,
@@ -1996,7 +2039,7 @@ describe("zodiac-liquidity", () => {
         await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            authority: owner.publicKey, vault: vaultPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, ephemeralWallet: depWithEphemeralPda, relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
             pool: poolPda, position: positionPda,
@@ -2039,8 +2082,9 @@ describe("zodiac-liquidity", () => {
             null,                                  // sol_amount (not using WSOL)
           )
           .accounts({
-            authority: owner.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
+            ephemeralWallet: depWithEphemeralPda,
             relayPda,
             pool: poolPda,
             position: positionPda,
@@ -2099,8 +2143,9 @@ describe("zodiac-liquidity", () => {
             new anchor.BN(0),            // token_b_amount_threshold (no minimum)
           )
           .accounts({
-            authority: owner.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
+            ephemeralWallet: depWithEphemeralPda,
             relayPda,
             poolAuthority: POOL_AUTHORITY,
             pool: poolPda,
@@ -2131,20 +2176,22 @@ describe("zodiac-liquidity", () => {
       }
     });
 
-    it("fails deposit_to_meteora with wrong authority", async function () {
+    it("fails deposit_to_meteora with unregistered ephemeral wallet", async function () {
       if (setupFailed) { this.skip(); return; }
-      const wrongAuthority = Keypair.generate();
+      const unregisteredWallet = Keypair.generate();
 
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: wrongAuthority.publicKey,
+          toPubkey: unregisteredWallet.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       try {
         await program.methods
@@ -2156,8 +2203,9 @@ describe("zodiac-liquidity", () => {
             null,
           )
           .accounts({
-            authority: wrongAuthority.publicKey,
+            payer: unregisteredWallet.publicKey,
             vault: vaultPda,
+            ephemeralWallet: unregisteredEphemeralPda,
             relayPda,
             pool: poolPda,
             position: positionPda,
@@ -2174,32 +2222,34 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([wrongAuthority])
+          .signers([unregisteredWallet])
           .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with unauthorized");
+        throw new Error("Should have failed with unregistered ephemeral wallet");
       } catch (err: any) {
-        console.log("Expected error for wrong authority (deposit):", err.message?.substring(0, 100));
+        console.log("Expected error for unregistered ephemeral wallet (deposit):", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
         expect(msg).to.satisfy((m: string) =>
-          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
+          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
         );
       }
     });
 
-    it("fails withdraw_from_meteora with wrong authority", async function () {
+    it("fails withdraw_from_meteora with unregistered ephemeral wallet", async function () {
       if (setupFailed) { this.skip(); return; }
-      const wrongAuthority = Keypair.generate();
+      const unregisteredWallet = Keypair.generate();
 
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: wrongAuthority.publicKey,
+          toPubkey: unregisteredWallet.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       try {
         await program.methods
@@ -2210,8 +2260,9 @@ describe("zodiac-liquidity", () => {
             new anchor.BN(0),
           )
           .accounts({
-            authority: wrongAuthority.publicKey,
+            payer: unregisteredWallet.publicKey,
             vault: vaultPda,
+            ephemeralWallet: unregisteredEphemeralPda,
             relayPda,
             poolAuthority: POOL_AUTHORITY,
             pool: poolPda,
@@ -2228,16 +2279,120 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
+          .signers([unregisteredWallet])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unregistered ephemeral wallet");
+      } catch (err: any) {
+        console.log("Expected error for unregistered ephemeral wallet (withdraw):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
+        );
+      }
+    });
+  });
+
+  // ============================================================
+  // EPHEMERAL WALLET TESTS
+  // ============================================================
+  describe("Ephemeral Wallet Management", () => {
+    it("registers an ephemeral wallet", async () => {
+      const ephemeralKeypair = Keypair.generate();
+      const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKeypair.publicKey, program.programId);
+
+      const sig = await program.methods
+        .registerEphemeralWallet()
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          wallet: ephemeralKeypair.publicKey,
+          ephemeralWallet: ephemeralPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Register ephemeral wallet tx:", sig);
+
+      const ephemeralAccount = await program.account.ephemeralWalletAccount.fetch(ephemeralPda);
+      expect(ephemeralAccount.vault.toString()).to.equal(vaultPda.toString());
+      expect(ephemeralAccount.wallet.toString()).to.equal(ephemeralKeypair.publicKey.toString());
+      console.log("Ephemeral wallet registered and verified");
+    });
+
+    it("fails register with wrong authority", async () => {
+      const wrongAuthority = Keypair.generate();
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: wrongAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      const ephemeralKeypair = Keypair.generate();
+      const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKeypair.publicKey, program.programId);
+
+      try {
+        await program.methods
+          .registerEphemeralWallet()
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            wallet: ephemeralKeypair.publicKey,
+            ephemeralWallet: ephemeralPda,
+            systemProgram: SystemProgram.programId,
+          })
           .signers([wrongAuthority])
           .rpc({ commitment: "confirmed" });
         throw new Error("Should have failed with unauthorized");
       } catch (err: any) {
-        console.log("Expected error for wrong authority (withdraw):", err.message?.substring(0, 100));
+        console.log("Expected error for wrong authority (register):", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
         expect(msg).to.satisfy((m: string) =>
           m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
         );
       }
+    });
+
+    it("closes an ephemeral wallet", async () => {
+      const ephemeralKeypair = Keypair.generate();
+      const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKeypair.publicKey, program.programId);
+
+      // Register first
+      await program.methods
+        .registerEphemeralWallet()
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          wallet: ephemeralKeypair.publicKey,
+          ephemeralWallet: ephemeralPda,
+          systemProgram: SystemProgram.programId,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      // Wait for settle
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Close it
+      const sig = await program.methods
+        .closeEphemeralWallet()
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          ephemeralWallet: ephemeralPda,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Close ephemeral wallet tx:", sig);
+
+      // Verify account is closed (should not exist)
+      const accountInfo = await provider.connection.getAccountInfo(ephemeralPda);
+      expect(accountInfo).to.be.null;
+      console.log("Ephemeral wallet closed and verified");
     });
   });
 

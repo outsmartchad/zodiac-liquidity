@@ -794,10 +794,6 @@ pub mod zodiac_liquidity {
         sol_amount: Option<u64>,
     ) -> Result<()> {
         require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
-        require!(
-            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
-            ErrorCode::Unauthorized
-        );
 
         msg!("Relay PDA {} deploying {} liquidity to Meteora", relay_index, liquidity_delta);
 
@@ -808,7 +804,7 @@ pub mod zodiac_liquidity {
                     CpiContext::new(
                         ctx.accounts.system_program.to_account_info(),
                         anchor_lang::system_program::Transfer {
-                            from: ctx.accounts.authority.to_account_info(),
+                            from: ctx.accounts.payer.to_account_info(),
                             to: ctx.accounts.relay_token_b.to_account_info(),
                         },
                     ),
@@ -886,10 +882,6 @@ pub mod zodiac_liquidity {
         token_b_amount_threshold: u64,
     ) -> Result<()> {
         require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
-        require!(
-            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
-            ErrorCode::Unauthorized
-        );
 
         msg!("Relay PDA {} withdrawing {} liquidity from Meteora", relay_index, liquidity_delta);
 
@@ -952,10 +944,6 @@ pub mod zodiac_liquidity {
         relay_index: u8,
     ) -> Result<()> {
         require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
-        require!(
-            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
-            ErrorCode::Unauthorized
-        );
 
         msg!("Creating Meteora position for relay PDA {}", relay_index);
 
@@ -1020,10 +1008,6 @@ pub mod zodiac_liquidity {
         activation_point: Option<u64>,
     ) -> Result<()> {
         require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
-        require!(
-            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
-            ErrorCode::Unauthorized
-        );
 
         msg!("Relay PDA {} creating Meteora pool", relay_index);
 
@@ -1101,10 +1085,6 @@ pub mod zodiac_liquidity {
         activation_point: Option<u64>,
     ) -> Result<()> {
         require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
-        require!(
-            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
-            ErrorCode::Unauthorized
-        );
 
         msg!("Relay PDA {} creating customizable Meteora pool", relay_index);
 
@@ -1258,6 +1238,44 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    // ============================================================
+    // EPHEMERAL WALLET MANAGEMENT
+    // ============================================================
+
+    /// Registers an ephemeral wallet PDA for a vault.
+    /// Only callable by vault authority. Allows the wallet to sign Meteora CPI instructions.
+    pub fn register_ephemeral_wallet(
+        ctx: Context<RegisterEphemeralWallet>,
+    ) -> Result<()> {
+        let ephemeral = &mut ctx.accounts.ephemeral_wallet;
+        ephemeral.bump = ctx.bumps.ephemeral_wallet;
+        ephemeral.vault = ctx.accounts.vault.key();
+        ephemeral.wallet = ctx.accounts.wallet.key();
+        msg!("Registered ephemeral wallet: {}", ctx.accounts.wallet.key());
+
+        emit!(EphemeralWalletRegisteredEvent {
+            vault: ctx.accounts.vault.key(),
+            wallet: ctx.accounts.wallet.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Closes an ephemeral wallet PDA, returning rent to the authority.
+    /// Only callable by vault authority. Called after user withdraws all liquidity.
+    pub fn close_ephemeral_wallet(
+        ctx: Context<CloseEphemeralWallet>,
+    ) -> Result<()> {
+        msg!("Closed ephemeral wallet: {}", ctx.accounts.ephemeral_wallet.wallet);
+
+        emit!(EphemeralWalletClosedEvent {
+            vault: ctx.accounts.vault.key(),
+            wallet: ctx.accounts.ephemeral_wallet.wallet,
+        });
+
+        Ok(())
+    }
+
 }
 
 // ============================================================
@@ -1298,6 +1316,17 @@ pub struct RelayPositionTracker {
     pub pool: Pubkey,
     pub position_nft_mint: Pubkey,
     pub bump: u8,
+}
+
+/// Ephemeral wallet authorization PDA.
+/// Registered by vault authority, allows an ephemeral wallet to sign Meteora CPI instructions.
+/// Seeds: [b"ephemeral", vault.key(), wallet.key()]
+#[account]
+#[derive(InitSpace)]
+pub struct EphemeralWalletAccount {
+    pub bump: u8,
+    pub vault: Pubkey,
+    pub wallet: Pubkey,
 }
 
 // ============================================================
@@ -2056,13 +2085,19 @@ pub struct ClearPositionCallback<'info> {
 #[instruction(relay_index: u8)]
 pub struct DepositToMeteoraDammV2<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that owns the Meteora position
     /// CHECK: Derived from vault + relay_index seeds
@@ -2125,13 +2160,19 @@ pub struct DepositToMeteoraDammV2<'info> {
 #[instruction(relay_index: u8)]
 pub struct WithdrawFromMeteoraDammV2<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that owns the Meteora position
     /// CHECK: Derived from vault + relay_index seeds
@@ -2197,13 +2238,19 @@ pub struct WithdrawFromMeteoraDammV2<'info> {
 #[instruction(relay_index: u8)]
 pub struct CreateMeteoraPosition<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that will own the Meteora position and pay rent
     /// CHECK: Derived from vault + relay_index seeds
@@ -2217,7 +2264,7 @@ pub struct CreateMeteoraPosition<'info> {
     /// Tracks relay position for this pool (enforces one per relay per pool)
     #[account(
         init,
-        payer = authority,
+        payer = payer,
         space = 8 + RelayPositionTracker::INIT_SPACE,
         seeds = [b"relay_position", vault.key().as_ref(), &[relay_index], pool.key().as_ref()],
         bump,
@@ -2265,13 +2312,19 @@ pub struct CreateMeteoraPosition<'info> {
 #[instruction(relay_index: u8)]
 pub struct CreatePoolViaRelay<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that acts as payer + creator for pool initialization
     /// CHECK: Derived from vault + relay_index seeds
@@ -2354,13 +2407,19 @@ pub struct CreatePoolViaRelay<'info> {
 #[instruction(relay_index: u8)]
 pub struct CreateCustomizablePoolViaRelay<'info> {
     #[account(mut)]
-    pub authority: Signer<'info>,
+    pub payer: Signer<'info>,
 
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that acts as payer + creator for pool initialization
     /// CHECK: Derived from vault + relay_index seeds
@@ -2509,6 +2568,61 @@ pub struct RelayTransferToDestination<'info> {
 
 
 // ============================================================
+// EPHEMERAL WALLET ACCOUNT CONTEXTS
+// ============================================================
+
+/// Accounts for registering an ephemeral wallet PDA
+#[derive(Accounts)]
+pub struct RegisterEphemeralWallet<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+        has_one = authority @ ErrorCode::Unauthorized,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// The ephemeral wallet pubkey to register
+    /// CHECK: This is the wallet address being registered, not a program account
+    pub wallet: UncheckedAccount<'info>,
+
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + EphemeralWalletAccount::INIT_SPACE,
+        seeds = [b"ephemeral", vault.key().as_ref(), wallet.key().as_ref()],
+        bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
+
+    pub system_program: Program<'info, System>,
+}
+
+/// Accounts for closing an ephemeral wallet PDA
+#[derive(Accounts)]
+pub struct CloseEphemeralWallet<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+        has_one = authority @ ErrorCode::Unauthorized,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        mut,
+        close = authority,
+        seeds = [b"ephemeral", vault.key().as_ref(), ephemeral_wallet.wallet.as_ref()],
+        bump = ephemeral_wallet.bump,
+    )]
+    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
+}
+
+// ============================================================
 // EVENTS
 // ============================================================
 
@@ -2604,6 +2718,18 @@ pub struct RelayTransferEvent {
     pub relay_index: u8,
     pub destination: Pubkey,
     pub amount: u64,
+}
+
+#[event]
+pub struct EphemeralWalletRegisteredEvent {
+    pub vault: Pubkey,
+    pub wallet: Pubkey,
+}
+
+#[event]
+pub struct EphemeralWalletClosedEvent {
+    pub vault: Pubkey,
+    pub wallet: Pubkey,
 }
 
 // ============================================================
