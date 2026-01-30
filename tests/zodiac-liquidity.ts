@@ -1483,13 +1483,13 @@ describe("zodiac-liquidity", () => {
         const authSplAta = await getOrCreateAssociatedTokenAccount(
           provider.connection, owner, splMint, owner.publicKey
         );
-        await mintTo(provider.connection, owner, splMint, authSplAta.address, owner, 10_000_000_000);
+        await mintTo(provider.connection, owner, splMint, authSplAta.address, owner, 200_000_000);
 
         // Wait before fund_relay calls
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         await program.methods
-          .fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+          .fundRelay(relayIndex, new anchor.BN(100_000_000))
           .accounts({
             authority: owner.publicKey,
             vault: vaultPda,
@@ -1506,7 +1506,7 @@ describe("zodiac-liquidity", () => {
           SystemProgram.transfer({
             fromPubkey: owner.publicKey,
             toPubkey: relayWsolAccount,
-            lamports: 5_000_000_000,
+            lamports: 100_000_000,
           }),
           createSyncNativeInstruction(relayWsolAccount),
         );
@@ -1747,17 +1747,17 @@ describe("zodiac-liquidity", () => {
       // Fund relay SPL token A
       const splMint = tA.equals(NATIVE_MINT) ? tB : tA;
       const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
-      await mintTo(provider.connection, owner, splMint, authTokenA.address, owner, 10_000_000_000);
+      await mintTo(provider.connection, owner, splMint, authTokenA.address, owner, 200_000_000);
 
       const relayTokenSpl = tA.equals(NATIVE_MINT) ? relayTokenB : relayTokenA;
-      await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+      await program.methods.fundRelay(relayIndex, new anchor.BN(100_000_000))
         .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
         .signers([owner]).rpc({ commitment: "confirmed" });
 
       // Fund relay WSOL account with SOL + sync native
       const relayTokenWsol = tA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
       const fundWsolTx = new anchor.web3.Transaction().add(
-        SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 5_000_000_000 }),
+        SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
         createSyncNativeInstruction(relayTokenWsol),
       );
       await provider.sendAndConfirm(fundWsolTx, [owner]);
@@ -1943,19 +1943,19 @@ describe("zodiac-liquidity", () => {
         // Fund relay SPL token via fund_relay
         const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
         const authTokenSpl = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
-        await mintTo(provider.connection, owner, splMint, authTokenSpl.address, owner, 10_000_000_000);
+        await mintTo(provider.connection, owner, splMint, authTokenSpl.address, owner, 200_000_000);
 
         await new Promise(resolve => setTimeout(resolve, 2000));
 
         const relayTokenSpl = tokenA.equals(NATIVE_MINT) ? relayTokenB : relayTokenA;
-        await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+        await program.methods.fundRelay(relayIndex, new anchor.BN(100_000_000))
           .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenSpl.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
           .signers([owner]).rpc({ commitment: "confirmed" });
 
         // Fund relay WSOL account with SOL + sync native
         const relayTokenWsol = tokenA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
         const fundWsolTx = new anchor.web3.Transaction().add(
-          SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 5_000_000_000 }),
+          SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
           createSyncNativeInstruction(relayTokenWsol),
         );
         await provider.sendAndConfirm(fundWsolTx, [owner]);
@@ -2067,8 +2067,8 @@ describe("zodiac-liquidity", () => {
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
         const liquidityDelta = calculateLiquidityFromAmounts(
           provider.connection,
-          new anchor.BN(1_000_000_000), // 1 token A
-          new anchor.BN(1_000_000_000), // 1 token B
+          new anchor.BN(10_000_000), // 0.01 token A
+          new anchor.BN(10_000_000), // 0.01 token B
           sqrtPrice,
         );
         console.log("Calculated liquidity delta for deposit:", liquidityDelta.toString());

@@ -1,0 +1,267 @@
+============================================================
+Zodiac Liquidity Tests - Setup
+============================================================
+Program ID: 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu
+Owner: 5P9MWSyYFnJc9sxsBePXbgXUHuxjuE3T9wsUUYbmuP4R
+MXE x25519 pubkey: ec7415f040714436b646910b9f8ba2d421c23bc3aaa915381b791a19021bf57c
+Encryption cipher initialized
+Creating test token mint...
+Token mint: 5zv5e7V2SwarR9qmHqXoYRijgbqYabBgVoZa65VMEke1
+Vault PDA: HXj6hEAEPFLL7fG12dgoEho6pHgANVyxykBFFN6xL56P
+User Position PDA: FG6sxVp2HA61jKThKM6jy8tyqUtW84s5GN41wDHVD2gW
+init_vault comp def PDA: 2YDvNdWcZy76jbveN5gi22zE1ZJRFrPT9tGPxmLGTqfS
+init_vault comp def already exists (188 bytes), skipping
+Init vault comp def tx: skipped
+init_user_position comp def PDA: H1rCXqUrZJP6JN8gCBwTZE7fSuzJYeyDqLEPUTRhANia
+init_user_position comp def already exists (195 bytes), skipping
+Init user position comp def tx: skipped
+deposit comp def PDA: HKtKzHTopWQJsCwJS7FZfnjVTdtZewgMkxp6ALtzr3We
+deposit comp def already exists (197 bytes), skipping
+Init deposit comp def tx: skipped
+reveal_pending_deposits comp def PDA: 2hTRsCrusBwg6NkBiXzjG7opNeoLCKXBBhTQSqbxzba2
+reveal_pending_deposits comp def already exists (201 bytes), skipping
+Init reveal pending comp def tx: skipped
+record_liquidity comp def PDA: 8cnacKUa4hCpREYaC2j6guKigzyLHX2q85MEvxWHirMa
+record_liquidity comp def already exists (198 bytes), skipping
+Init record liquidity comp def tx: skipped
+compute_withdrawal comp def PDA: FHMUSexnZoMC6M4nhzFiZZ8AqGn3iq8C7Z3Ykk6wauAv
+compute_withdrawal comp def already exists (199 bytes), skipping
+Init withdraw comp def tx: skipped
+get_user_position comp def PDA: GHDVJLETNZTxFGRqYibxfv8DivpcVsq26cpjze1EP7dP
+get_user_position comp def already exists (199 bytes), skipping
+Init get position comp def tx: skipped
+clear_position comp def PDA: DokV7f8rqceY1PqAZUvKrg4cWXtyDzCi5Ka16pu1ga3R
+clear_position comp def already exists (202 bytes), skipping
+Init clear position comp def tx: skipped
+MXE key already available, reusing...
+[createVault] Attempt 1/5 - queuing computation (offset: 15890576882853408683)
+[createVault] Queue tx: Tg58cdvAsbZ1gjpjGyWXpCTqjELPY76bDkZDo16pFAT8mAkhhu5uDmFXfmXtgTsgUUQHPWtTn5z6tJRATMvtW63
+[createVault] Waiting for computation finalization...
+[createVault] Finalize tx: 4ANczyayQTY6oVsRQG86Mue3gF4XS91pfTsquaCkV7Wi7tbPjqDnFJDHua9WqsxZU1nWjDxra48d6qB7fK1g2qF9
+[createVault] Computation succeeded on attempt 1
+
+--- Vault Creation Data ---
+Vault authority: 5P9MWSyYFnJc9sxsBePXbgXUHuxjuE3T9wsUUYbmuP4R
+Vault token_mint: 5zv5e7V2SwarR9qmHqXoYRijgbqYabBgVoZa65VMEke1
+Vault state[0] (pending_deposits): b2a06b1bc50a4571a5232ae18042c9085390bde2ea3ed64b9c4a94c640b7f871
+Vault state[1] (total_liquidity): 0b2c2537d622329b767fe5f840b34c1f2b391d81c525f110953ad7595d2eeb19
+Vault state[2] (total_deposited): de926990d81f987b60117b62c1ea72d7845574bd17974c5b442313e7848afa37
+Vault nonce: 310210876981236463324877828550788374436
+--- End Vault Creation Data ---
+
+[createUserPosition] Attempt 1/5 - queuing computation (offset: 14963108270216162174)
+[createUserPosition] Queue tx: 2pxzP24ni852nbcQUBnNe2Ss3w6fGeXBbwRCS3VzcRAofAm9UwXV3iibK9YcQf9hbQRrKt2GDDAeH7QE1Frg3hef
+[createUserPosition] Waiting for computation finalization...
+[createUserPosition] Finalize tx: 327RvGH7yha19e75upxsytAztmSUxfdbYDSYmaCbdWmQhzm3WBno3uve9wJUoJxtGDhs1ceHbTwXjtPoqKqQmXP4
+[createUserPosition] Computation succeeded on attempt 1
+User position created, finalize tx: 327RvGH7yha19e75upxsytAztmSUxfdbYDSYmaCbdWmQhzm3WBno3uve9wJUoJxtGDhs1ceHbTwXjtPoqKqQmXP4
+
+--- User Position Creation Data ---
+Position owner: 5P9MWSyYFnJc9sxsBePXbgXUHuxjuE3T9wsUUYbmuP4R
+Position vault: HXj6hEAEPFLL7fG12dgoEho6pHgANVyxykBFFN6xL56P
+Position state[0] (deposited): d5d30a3c79dbf9224a1e15ebc22b8880207abbeceeaa8184f50f4518fed46621
+Position state[1] (lp_share): 340e2ba3c4a29cf1153fc0ebbc8b3f90e31014bb251f3cd7453dcfec572f0d7c
+Position nonce: 154970060451130647065750819666494064987
+--- End User Position Creation Data ---
+
+[deposit] Attempt 1/5 - queuing computation (offset: 5593873998414264101)
+[deposit] Queue tx: 66zTTUEAQ9Fex1QLGoSkSV1NzPy2xeW9UvRP8UrorB9hqsySsN1iPwqKwDPfTdUY7U6pjEMpHs7bRsfFnimNtq4S
+[deposit] Waiting for computation finalization...
+[deposit] Finalize tx: 4GnUv56TruTrbg6RBxM6siYPvoaexKAk2P84D6fnRs3zWFEo6J4EVwE9TxQQKPE1kESqfF1rd5SzUXN9zWzrtjSJ
+[deposit] Computation succeeded on attempt 1
+Deposit succeeded, finalize tx: 4GnUv56TruTrbg6RBxM6siYPvoaexKAk2P84D6fnRs3zWFEo6J4EVwE9TxQQKPE1kESqfF1rd5SzUXN9zWzrtjSJ
+
+--- Deposit Data ---
+Deposit amount (plaintext): 1000000000
+[createVault] Computation account confirmed on-chain, continuing to wait...
+Vault state after deposit:
+  vault_state[0] (pending_deposits): 3e825c12dbfcfcd61e72636629436e8412cc5281fe8649cbe7599f48627a7e52
+  vault_state[1] (total_liquidity): ec898963c4768c2194cf70a993106983e9074218040e3b8674920bdf6e41bb52
+  vault_state[2] (total_deposited): 3b8a0e90ee9ace40b514e63008118a60c25ddda9098fd8f1ec64c9736aa4d512
+  nonce: 310210876981236463324877828550788374437
+User position after deposit:
+  position_state[0] (deposited): 13ff84113d97590b99ba4ad0621b4602f917a17650d4e0986affc85dd3f6d14f
+  position_state[1] (lp_share): 1c96ad4f7ad63355d66a4a3a3287b2d7e9c89baffa8963cf3276cf4f4276e948
+  nonce: 154970060451130647065750819666494064988
+--- End Deposit Data ---
+
+[revealPendingDeposits] Attempt 1/5 - queuing computation (offset: 17506485713764422903)
+[revealPendingDeposits] Queue tx: 3FY7qGELoCics5c4k8rPWN6ZXJBxjX7LmWxY84zaE1N3TQBfDUa1vnv19tFWBE9JsvssPrzPsWknCLVz2YD4b3x8
+[revealPendingDeposits] Waiting for computation finalization...
+[revealPendingDeposits] Finalize tx: yJEQHTq8JG4EZsKFYtgz7VGwrQ1gVJj6EPVpiC2q729wh2wQL4xPXvfWYJZsLCk9QYxzTuk1EziunCwqgAQ9f3m
+[revealPendingDeposits] Computation succeeded on attempt 1
+Reveal succeeded, finalize tx: yJEQHTq8JG4EZsKFYtgz7VGwrQ1gVJj6EPVpiC2q729wh2wQL4xPXvfWYJZsLCk9QYxzTuk1EziunCwqgAQ9f3m
+
+--- Reveal Pending Deposits Data ---
+[createUserPosition] Computation account confirmed on-chain, continuing to wait...
+Reveal tx logs:
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ invoke [1]
+  Program log: Instruction: CallbackComputation
+  Program data: m9Xun/BMpxP3FGHaAIjz8kYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program data: G0t13b/V/fn3FGHaAIjz8kYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ consumed 34408 of 800000 compute units
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ success
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu invoke [1]
+  Program log: Instruction: RevealPendingDepositsCallback
+  Program data: OISnmbyeyvL1mgQBCDTEmOuR8gTAR12QaJWGoeDtuWqc2c+hPNVFkADKmjsAAAAA
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu consumed 92740 of 765592 compute units
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 672852 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 672356 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+Vault state after reveal:
+  vault_state[0] (pending_deposits): 3e825c12dbfcfcd61e72636629436e8412cc5281fe8649cbe7599f48627a7e52
+  vault_state[1] (total_liquidity): ec898963c4768c2194cf70a993106983e9074218040e3b8674920bdf6e41bb52
+  vault_state[2] (total_deposited): 3b8a0e90ee9ace40b514e63008118a60c25ddda9098fd8f1ec64c9736aa4d512
+  nonce: 310210876981236463324877828550788374437
+--- End Reveal Data ---
+
+[recordLiquidity] Attempt 1/5 - queuing computation (offset: 2069270886668130604)
+[recordLiquidity] Queue tx: 564VSNJbHtJC2uyQMGFYuVJPUBdjgWqEKNx95mZ4DYrXTY4JuvvwWye9BcQRZT6asu4KaEnSfdAD57vxWDTYTyny
+[recordLiquidity] Waiting for computation finalization...
+[recordLiquidity] Finalize tx: 5FvLqFK3b9pTFHcA6fP24bMZ9qGV8BkZwPMzynez7uFAa4jYKAdA8WyFp2dRhvfNhbkF8FqbQo3SyKrcQBVc83TK
+[recordLiquidity] Computation succeeded on attempt 1
+Record liquidity succeeded, finalize tx: 5FvLqFK3b9pTFHcA6fP24bMZ9qGV8BkZwPMzynez7uFAa4jYKAdA8WyFp2dRhvfNhbkF8FqbQo3SyKrcQBVc83TK
+
+--- Record Liquidity Data ---
+Vault state after record liquidity:
+  vault_state[0] (pending_deposits): ce0995c6f7eabc8c0f8a311f57c649a67cf1b93f7690ba3227da153c3e045b0d
+  vault_state[1] (total_liquidity): 7d2fb1fde377f0baff5d83ac6baaa2d9b8e97f5b030290c75f691674151e125a
+  vault_state[2] (total_deposited): c52d5b15306668772ed2599beec0ab4657d2099fa6dee0ed7649d95a25bc0b51
+  nonce: 310210876981236463324877828550788374438
+--- End Record Liquidity Data ---
+
+[computeWithdrawal] Attempt 1/5 - queuing computation (offset: 6462484337047037280)
+[computeWithdrawal] Queue tx: 3CRnfU9XJYqFSNj4Cod3EDYUWXFUrovmxTXHL1hD7qXd8kfXfSeT1r1EuW1wdzZuja63K2b56hsSFwNnaMsKBXwf
+[computeWithdrawal] Waiting for computation finalization...
+[computeWithdrawal] Finalize tx: 3z8nbiYnjpFcns8FZt6fsatLWuj9gsPvpVgqtxunTxNxXVqvb1LQNW8ti5sJcyWkSR7Hti7GhdxgvFvDnPrazgm3
+[computeWithdrawal] Computation succeeded on attempt 1
+Withdrawal computation succeeded, finalize tx: 3z8nbiYnjpFcns8FZt6fsatLWuj9gsPvpVgqtxunTxNxXVqvb1LQNW8ti5sJcyWkSR7Hti7GhdxgvFvDnPrazgm3
+
+--- Withdrawal Data ---
+Withdrawal tx logs:
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ invoke [1]
+  Program log: Instruction: CallbackComputation
+  Program data: m9Xun/BMpxNg5TbMQ1uvWUYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program data: G0t13b/V/flg5TbMQ1uvWUYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ consumed 35281 of 800000 compute units
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ success
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu invoke [1]
+  Program log: Instruction: ComputeWithdrawalCallback
+  Program data: FgmFGqAsR8D1mgQBCDTEmOuR8gTAR12QaJWGoeDtuWqc2c+hPNVFkEEa+I7Yub/R07wSWvqKuPC+X8fP/s8CjVs3inSn7jQ+h2o3zyFqfvp+QfX8tcZ0L7yfRU+ELKXJjpitC7mcNxZyDEI7Yiy6RuEjtC6k/CLK
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu consumed 91737 of 764719 compute units
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 672982 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 672486 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+Vault state after withdrawal:
+  vault_state[0] (pending_deposits): ce0995c6f7eabc8c0f8a311f57c649a67cf1b93f7690ba3227da153c3e045b0d
+  vault_state[1] (total_liquidity): 7d2fb1fde377f0baff5d83ac6baaa2d9b8e97f5b030290c75f691674151e125a
+  vault_state[2] (total_deposited): c52d5b15306668772ed2599beec0ab4657d2099fa6dee0ed7649d95a25bc0b51
+  nonce: 310210876981236463324877828550788374438
+User position after withdrawal:
+  position_state[0] (deposited): 13ff84113d97590b99ba4ad0621b4602f917a17650d4e0986affc85dd3f6d14f
+  position_state[1] (lp_share): 1c96ad4f7ad63355d66a4a3a3287b2d7e9c89baffa8963cf3276cf4f4276e948
+  nonce: 154970060451130647065750819666494064988
+--- End Withdrawal Data ---
+
+[clearPosition] Attempt 1/5 - queuing computation (offset: 17880573226521413471)
+[clearPosition] Queue tx: 34UGUNrAFdByih9ad8W962AcNVvYMvxBRz8jJn2w3Tf2EfmuaTenJqK9iQRfdnvbeq9d7uDbx1uKHGp2V8QYwyfK
+[clearPosition] Waiting for computation finalization...
+[deposit] Computation account confirmed on-chain, continuing to wait...
+[clearPosition] Finalize tx: fjbr9vUAPY4mEgR6HPZYDsmFRxHYreoTRE57Vz7W41QMS2r8MdqZKVoSAkkZMyuddQaUM711fkxU7hp3PwzNbPo
+[clearPosition] Computation succeeded on attempt 1
+Clear position succeeded, finalize tx: fjbr9vUAPY4mEgR6HPZYDsmFRxHYreoTRE57Vz7W41QMS2r8MdqZKVoSAkkZMyuddQaUM711fkxU7hp3PwzNbPo
+
+--- Clear Position Data ---
+Vault state after clear:
+  vault_state[0] (pending_deposits): 0e6941f0ed2a888ea0f6a65fba6397c2a14e6d9be0407fc04d1905b4d33bf459
+  vault_state[1] (total_liquidity): e3d10ae02d4de32803d4cd744279703983f231dcd22000d00dbc0dddde065558
+  vault_state[2] (total_deposited): a554897444f0455fc7df2f277cfa351fabb8140dcb846ac1170fd54873bb364d
+  nonce: 310210876981236463324877828550788374439
+User position after clear:
+  position_state[0] (deposited): c070695247614eb3595f894934a277f7fc65db6c494c194747a000f10e24737b
+  position_state[1] (lp_share): b30669cbfb78d885bb661cd91e52b851d1d8d252058de9733b1c78ec2c020a27
+  nonce: 154970060451130647065750819666494064989
+--- End Clear Position Data ---
+
+[getUserPosition] Attempt 1/5 - queuing computation (offset: 104289697171090253)
+[getUserPosition] Queue tx: 2ZgYeaoEXP7Ttwf8F8SXfFiErjqxGVaLozYFh6Nrm5kMmc9hJej1KwZQnGHiSsEfKTTj7oQ6F71cuRhNGhseXM7R
+[getUserPosition] Waiting for computation finalization...
+[revealPendingDeposits] Computation account confirmed on-chain, continuing to wait...
+[getUserPosition] Finalize tx: 5ftFzjnsh2R4LAGpWqPgaRrxiZQMsnFtXgp9UyvpMskDCva61U338s9yC2cm63EEFbiyEkPcwsmoTai1sqABd3uW
+[getUserPosition] Computation succeeded on attempt 1
+Get user position succeeded, finalize tx: 5ftFzjnsh2R4LAGpWqPgaRrxiZQMsnFtXgp9UyvpMskDCva61U338s9yC2cm63EEFbiyEkPcwsmoTai1sqABd3uW
+
+--- User Position Data ---
+Get position tx logs:
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ invoke [1]
+  Program log: Instruction: CallbackComputation
+  Program data: m9Xun/BMpxNNq51R7YJyAUYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program data: G0t13b/V/flNq51R7YJyAUYVNijA5MSUj50i5LtMDQUSrIy2ENnl4gxD18ilUTf6
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ consumed 34644 of 800000 compute units
+  Program Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ success
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu invoke [1]
+  Program log: Instruction: GetUserPositionCallback
+  Program data: bM7KXKlQ8zAbiVf0s+PD6HaFTM7u34U7WvDmyMvoZOD+X1OPzPk8ccpCFQLjIRGrHOTFiKnQFY20+BObcEwoY3Zq9x6+tdQXCcujlUhSfvonJd7blGRq4A==
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu consumed 102931 of 765356 compute units
+  Program 5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 662425 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 invoke [1]
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 consumed 496 of 661929 compute units
+  Program L2TExMFKdjpN9kozasaurPirfHy9P8sbXoAN1qA3S95 success
+--- End User Position Data ---
+
+Relay PDA: 7kyE8bGEUFtxb8tyPHX4LVN1jVx5xGM9hxUbxcHKXWm5
+Relay token account: 2buQQXMNfzqmAatRKNssBrmXHyFd5Ej8Cw9nXTirBMha
+  RPC 403, retrying (1/3)...
+Destination token account: 34UYdrQeUkax7aw9BJXexbYp5Tq3aVWzHctv4D1dFuwr
+[recordLiquidity] Computation account confirmed on-chain, continuing to wait...
+[computeWithdrawal] Computation account confirmed on-chain, continuing to wait...
+Funded relay with 100000 tokens
+Relay balance before transfer: 100000
+[clearPosition] Computation account confirmed on-chain, continuing to wait...
+Relay transfer tx: qg8HUQU2BX5JRzZw6zYsiuawY4ZTYJ8wUuNweo31EKZMXJP37sXCeKgmx8EtvBzdn3ydxDDEhB4Pz4uVv7cQRJ9
+Destination balance after transfer: 100000
+[getUserPosition] Computation account confirmed on-chain, continuing to wait...
+Expected error for wrong authority: AnchorError thrown in programs/zodiac_liquidity/src/lib.rs:1202. Error Code: Unauthorized. Error Num
+Expected error for invalid relay index: AnchorError thrown in programs/zodiac_liquidity/src/lib.rs:1201. Error Code: InvalidRelayIndex. Erro
+Fund relay tx: 3VsrGcZrbF3jjAESigD5TEyaE2a1hkRVvFrCyQZcs8JApibr3vuLFohwkVFj9qhtDRYuM36JbbDYqEeGsDJkvcxH
+Relay PDA 2 funded with 500000 tokens
+Expected error for wrong authority: AnchorError thrown in programs/zodiac_liquidity/src/lib.rs:1161. Error Code: Unauthorized. Error Num
+Registered owner as ephemeral wallet: 3wJLZGkeQh1jHXMeiTW5ZaWqBN592DAN645x3PY2JGxs
+Token A: So11111111111111111111111111111111111111112 (WSOL)
+Token B: 8oHcEuuH7eWygLH8ZSato9fHhWfJVsfBQsC9Jsa7cdij (SPL)
+Relay PDA funded with SPL token and WSOL for pool creation
+Create customizable pool tx: ChHt3BixDXP7d96rVGhjaUGu4rST2aPttsPhV3raec3vfiEn1aDszxRMxBQac55DL1dfRNUEYnJt15oKdYkZUUM
+Pool account size: 1112 bytes
+Pool created at: 3jDcdeJb2Wu3rWtyxWzUQFV6mtYSE4HkVQQRCcuKMHHG
+Expected error for unregistered ephemeral wallet: AnchorError caused by account: ephemeral_wallet. Error Code: AccountNotInitialized. Error Number: 30
+Pool created for position test
+Deposit/Withdraw test - Token A: So11111111111111111111111111111111111111112 (WSOL)
+Deposit/Withdraw test - Token B: Gv5q6vvVAZJLUjv7BKJwhjt2FoX7hwxBKJLDMLMyDnup (SPL)
+Pool created for deposit/withdraw test at: CUKtFFstSRMRu1cBFA7xK2WxzsWqWMLnjJvSea31jv9d
+Position created for deposit/withdraw test
+Calculated liquidity delta for deposit: 184467440780045996330000375
+Deposit to Meteora tx: 51ZmEBzbKgG835eZP8Y3hA5JijmjmdMzM29WppzautLzHv8KvtU4oD67tgVhXq34D92nVzkoWacVt1jeuf63YY5e
+Position account size after deposit: 408 bytes
+Position unlocked_liquidity: 184467440780045996330000375
+Withdraw from Meteora tx: tYcN6qXiYTqGQ7J4jvJT4rpAjiCDwR3g8BuWaFXZFAQkTUmGYs27HfG8EjQxQTmCTujLt6CNaAcoyYz6caDrq12
+Expected error for unregistered ephemeral wallet (deposit): AnchorError caused by account: ephemeral_wallet. Error Code: AccountNotInitialized. Error Number: 30
+Expected error for unregistered ephemeral wallet (withdraw): AnchorError caused by account: ephemeral_wallet. Error Code: AccountNotInitialized. Error Number: 30
+Register ephemeral wallet tx: 3zwNYtpSJLsnEPPSKLWsLWRoTnBkECVSLiX2xeUxsq49aB2Bf7mp9cPgZruLnK5NzBTUL2z4fVTRPFhSWFTUUyv4
+Ephemeral wallet registered and verified
+Expected error for wrong authority (register): AnchorError caused by account: vault. Error Code: Unauthorized. Error Number: 6002. Error Message: U
+Close ephemeral wallet tx: ggyMeZQEpXmFAQitN4F2HS4kQTb3rU3pCR4gzzjkTu6FmDuQtbLzyxee3YqcyGckakN3ewbxzDh3w6N6rc16bbe
+Ephemeral wallet closed and verified
+============================================================
+All tests complete. Log saved to: test-run.log
+============================================================
