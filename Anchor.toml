@@ -18,7 +18,7 @@ zodiac_mixer = "H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "https://devnet.helius-rpc.com/?api-key=c3913152-a27f-4ff6-b7ab-156bc13bb6e0"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

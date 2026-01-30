@@ -10,6 +10,7 @@
     "@coral-xyz/anchor": "^0.32.0",
     "@meteora-ag/cp-amm-sdk": "^1.0.0",
     "@solana/spl-token": "^0.4.14",
+    "dotenv": "^17.2.3",
     "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
