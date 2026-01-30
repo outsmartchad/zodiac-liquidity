@@ -9,3 +9,6 @@ build/
 *.log
 *.txt
 .env
+CLAUDE.md
+*.pem
+artifacts/arx_node_logs/

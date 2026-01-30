@@ -1,4 +1,0 @@
-2026-01-30T06:35:51.801638Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=0
-2026-01-30T06:35:51.851597Z ERROR arx: arx/src/main.rs:58: PANIC DETECTED: panicked at arx/src/units/bls_unit.rs:53:13:
-Failed to bind BLS signature listener to 0.0.0.0:8002: Address already in use (os error 98)
-2026-01-30T06:35:51.851644Z ERROR arx: arx/src/main.rs:60: PANIC LOCATION: arx/src/units/bls_unit.rs:53:13

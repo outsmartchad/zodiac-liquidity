@@ -39,6 +39,7 @@ import {
   mintTo,
   getAccount,
   createSyncNativeInstruction,
+  closeAccount,
 } from "@solana/spl-token";
 import {
   CpAmm,
@@ -393,6 +394,7 @@ describe("zodiac-liquidity", () => {
 
   const clusterAccount = getClusterAccount();
   let owner: Keypair;
+  let relayer: Keypair;
   let tokenMint: PublicKey;
   let vaultPda: PublicKey;
   let userPositionPda: PublicKey;
@@ -408,6 +410,18 @@ describe("zodiac-liquidity", () => {
 
     owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
     console.log("Owner:", owner.publicKey.toString());
+
+    // Create and fund relayer wallet (simulates mixer output)
+    relayer = Keypair.generate();
+    const fundRelayerTx = new anchor.web3.Transaction().add(
+      SystemProgram.transfer({
+        fromPubkey: owner.publicKey,
+        toPubkey: relayer.publicKey,
+        lamports: 500_000_000, // 0.5 SOL
+      })
+    );
+    await provider.sendAndConfirm(fundRelayerTx, [owner]);
+    console.log("Relayer:", relayer.publicKey.toString(), "(funded with 0.5 SOL)");
 
     // Get MXE public key for encryption
     try {
@@ -1441,15 +1455,15 @@ describe("zodiac-liquidity", () => {
 
         relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
 
-        // Fund relay PDA with SOL for rent + WSOL wrapping
+        // Fund relay PDA with SOL for rent + WSOL wrapping (relayer simulates mixer output)
         const fundRelayTx = new anchor.web3.Transaction().add(
           SystemProgram.transfer({
-            fromPubkey: owner.publicKey,
+            fromPubkey: relayer.publicKey,
             toPubkey: relayPda,
             lamports: 100_000_000, // 0.1 SOL for rent + operations
           })
         );
-        await provider.sendAndConfirm(fundRelayTx, [owner]);
+        await provider.sendAndConfirm(fundRelayTx, [relayer]);
 
         // Create relay token accounts (keypair to avoid ATA off-curve error)
         // Token A: SPL token account
@@ -1501,21 +1515,32 @@ describe("zodiac-liquidity", () => {
           .signers([owner])
           .rpc({ commitment: "confirmed" });
 
-        // Fund relay WSOL account by transferring SOL + sync native
+        // Fund relay WSOL account by transferring SOL + sync native (relayer funds SOL)
         const fundWsolTx = new anchor.web3.Transaction().add(
           SystemProgram.transfer({
-            fromPubkey: owner.publicKey,
+            fromPubkey: relayer.publicKey,
             toPubkey: relayWsolAccount,
             lamports: 100_000_000,
           }),
           createSyncNativeInstruction(relayWsolAccount),
         );
-        await provider.sendAndConfirm(fundWsolTx, [owner]);
+        await provider.sendAndConfirm(fundWsolTx, [relayer]);
 
-        console.log("Relay PDA funded with SPL token and WSOL for pool creation");
+        console.log("Relay PDA funded with SPL token (authority) and WSOL (relayer) for pool creation");
       } catch (err: any) {
         console.log("Meteora CPI setup failed (DAMM v2 likely not deployed):", err.message?.substring(0, 100));
         setupFailed = true;
+      }
+    });
+
+    after(async () => {
+      if (setupFailed) return;
+      try {
+        const wsolAccount = tokenA.equals(NATIVE_MINT) ? relayTokenAPubkey : relayTokenBPubkey;
+        await closeAccount(provider.connection, owner, wsolAccount, owner.publicKey, owner);
+        console.log("Closed WSOL account, SOL reclaimed (create customizable pool section)");
+      } catch (err: any) {
+        console.log("Cleanup: could not close WSOL account:", err.message?.substring(0, 80));
       }
     });
 
@@ -1723,15 +1748,15 @@ describe("zodiac-liquidity", () => {
       const relayIndex = 5;
       const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
 
-      // Fund relay PDA with 0.05 SOL for rent via transfer from owner
+      // Fund relay PDA with SOL for rent (relayer simulates mixer output)
       const fundRelayTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: owner.publicKey,
+          fromPubkey: relayer.publicKey,
           toPubkey: relayPda,
           lamports: 50_000_000,
         })
       );
-      await provider.sendAndConfirm(fundRelayTx, [owner]);
+      await provider.sendAndConfirm(fundRelayTx, [relayer]);
 
       // Create SPL mint + use NATIVE_MINT (WSOL) for SOL-paired pool
       const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
@@ -1744,7 +1769,7 @@ describe("zodiac-liquidity", () => {
       const relayTokenBKp = Keypair.generate();
       const relayTokenB = await createAccount(provider.connection, owner, tB, relayPda, relayTokenBKp);
 
-      // Fund relay SPL token A
+      // Fund relay SPL token A (authority mints + transfers)
       const splMint = tA.equals(NATIVE_MINT) ? tB : tA;
       const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
       await mintTo(provider.connection, owner, splMint, authTokenA.address, owner, 200_000_000);
@@ -1754,13 +1779,13 @@ describe("zodiac-liquidity", () => {
         .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
         .signers([owner]).rpc({ commitment: "confirmed" });
 
-      // Fund relay WSOL account with SOL + sync native
+      // Fund relay WSOL account with SOL + sync native (relayer funds SOL)
       const relayTokenWsol = tA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
       const fundWsolTx = new anchor.web3.Transaction().add(
-        SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
+        SystemProgram.transfer({ fromPubkey: relayer.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
         createSyncNativeInstruction(relayTokenWsol),
       );
-      await provider.sendAndConfirm(fundWsolTx, [owner]);
+      await provider.sendAndConfirm(fundWsolTx, [relayer]);
 
       // First create a pool via relay using customizable (no config needed)
       const poolNftMint = Keypair.generate();
@@ -1916,15 +1941,15 @@ describe("zodiac-liquidity", () => {
 
         relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
 
-        // Fund relay PDA with SOL for rent
+        // Fund relay PDA with SOL for rent (relayer simulates mixer output)
         const fundRelayTx = new anchor.web3.Transaction().add(
           SystemProgram.transfer({
-            fromPubkey: owner.publicKey,
+            fromPubkey: relayer.publicKey,
             toPubkey: relayPda,
             lamports: 50_000_000,
           })
         );
-        await provider.sendAndConfirm(fundRelayTx, [owner]);
+        await provider.sendAndConfirm(fundRelayTx, [relayer]);
 
         // Create SPL mint + use NATIVE_MINT (WSOL) for SOL-paired pool
         const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
@@ -1940,7 +1965,7 @@ describe("zodiac-liquidity", () => {
         const relayTokenBKp = Keypair.generate();
         relayTokenB = await createAccount(provider.connection, owner, tokenB, relayPda, relayTokenBKp);
 
-        // Fund relay SPL token via fund_relay
+        // Fund relay SPL token via fund_relay (authority mints + transfers)
         const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
         const authTokenSpl = await getOrCreateAssociatedTokenAccount(provider.connection, owner, splMint, owner.publicKey);
         await mintTo(provider.connection, owner, splMint, authTokenSpl.address, owner, 200_000_000);
@@ -1952,13 +1977,13 @@ describe("zodiac-liquidity", () => {
           .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenSpl.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
           .signers([owner]).rpc({ commitment: "confirmed" });
 
-        // Fund relay WSOL account with SOL + sync native
+        // Fund relay WSOL account with SOL + sync native (relayer funds SOL)
         const relayTokenWsol = tokenA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
         const fundWsolTx = new anchor.web3.Transaction().add(
-          SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
+          SystemProgram.transfer({ fromPubkey: relayer.publicKey, toPubkey: relayTokenWsol, lamports: 100_000_000 }),
           createSyncNativeInstruction(relayTokenWsol),
         );
-        await provider.sendAndConfirm(fundWsolTx, [owner]);
+        await provider.sendAndConfirm(fundWsolTx, [relayer]);
 
         // Create a customizable pool
         const poolNftMint = Keypair.generate();
@@ -2054,6 +2079,17 @@ describe("zodiac-liquidity", () => {
       } catch (err: any) {
         console.log("Deposit/withdraw test setup failed:", err.message?.substring(0, 150));
         setupFailed = true;
+      }
+    });
+
+    after(async () => {
+      if (setupFailed) return;
+      try {
+        const wsolAccount = tokenA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
+        await closeAccount(provider.connection, owner, wsolAccount, owner.publicKey, owner);
+        console.log("Closed WSOL account, SOL reclaimed (deposit/withdraw section)");
+      } catch (err: any) {
+        console.log("Cleanup: could not close WSOL account:", err.message?.substring(0, 80));
       }
     });
 
@@ -2396,7 +2432,23 @@ describe("zodiac-liquidity", () => {
     });
   });
 
-  after(() => {
+  after(async () => {
+    // Return remaining relayer SOL to owner
+    try {
+      const relayerBal = await provider.connection.getBalance(relayer.publicKey);
+      if (relayerBal > 5000) {
+        const returnTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: relayer.publicKey,
+            toPubkey: owner.publicKey,
+            lamports: relayerBal - 5000, // leave min for fee
+          })
+        );
+        await provider.sendAndConfirm(returnTx, [relayer]);
+        console.log("Returned relayer SOL to owner");
+      }
+    } catch {}
+
     console.log("=".repeat(60));
     console.log("All tests complete. Log saved to:", LOG_FILE);
     console.log("=".repeat(60));
