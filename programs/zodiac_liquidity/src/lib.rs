@@ -1,10 +1,22 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::sysvar::instructions as sysvar_instructions;
 use anchor_spl::token_interface::TokenInterface;
 use anchor_spl::token;
 use arcium_anchor::prelude::*;
 use arcium_client::idl::arcium::types::{CallbackAccount, CircuitSource, OffChainCircuitSource};
 use arcium_macros::circuit_hash;
 use std::str::FromStr;
+
+/// Ed25519 precompile program ID
+fn ed25519_program_id() -> Pubkey {
+    Pubkey::from_str("Ed25519SigVerify111111111111111111111111111").unwrap()
+}
+
+/// Precomputed Anchor discriminators: sha256("global:<instruction_name>")[..8]
+const DISC_META_DEPOSIT: [u8; 8] = [0xed, 0xb4, 0x8b, 0xb2, 0xf3, 0xf1, 0xf8, 0xb2];
+const DISC_META_WITHDRAW: [u8; 8] = [0xda, 0x90, 0xc2, 0x12, 0x3f, 0x07, 0xc6, 0x15];
+const DISC_META_CREATE_POSITION: [u8; 8] = [0x3d, 0x14, 0x56, 0x51, 0x26, 0x03, 0x69, 0x22];
+const DISC_META_CREATE_POOL: [u8; 8] = [0x91, 0x4c, 0xcf, 0xa1, 0xa7, 0xfb, 0x8e, 0x70];
 
 // Declare the external DAMM v2 program from IDL
 declare_program!(damm_v2);
@@ -94,6 +106,7 @@ pub mod zodiac_liquidity {
             Some(CircuitSource::OffChain(OffChainCircuitSource {
                 source: "https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/reveal_pending_deposits.arcis".to_string(),
                 hash: circuit_hash!("reveal_pending_deposits"),
+                
             })),
             None,
         )?;
@@ -166,6 +179,7 @@ pub mod zodiac_liquidity {
         ctx.accounts.vault.authority = ctx.accounts.authority.key();
         ctx.accounts.vault.token_mint = ctx.accounts.token_mint.key();
         ctx.accounts.vault.nonce = nonce;
+        ctx.accounts.vault.meta_nonce = 0;
         ctx.accounts.vault.vault_state = [[0; 32]; 3]; // 3 u64s: pending, lp_tokens, total_deposited
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
@@ -1111,6 +1125,417 @@ pub mod zodiac_liquidity {
 
         Ok(())
     }
+
+    // ============================================================
+    // META-TX INSTRUCTIONS (cranker submits, authority signs off-chain)
+    // ============================================================
+
+    /// Meta-tx variant of deposit_to_meteora_damm_v2.
+    /// Cranker submits; authority's Ed25519 signature is verified via precompile.
+    /// No sol_amount — relay must be pre-funded with WSOL.
+    pub fn meta_deposit_to_meteora_damm_v2(
+        ctx: Context<MetaDepositToMeteoraDammV2>,
+        relay_index: u8,
+        liquidity_delta: u128,
+        token_a_amount_threshold: u64,
+        token_b_amount_threshold: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        // Build expected message: [discriminator][params][meta_nonce][vault_pubkey]
+        let mut expected_message = Vec::new();
+        expected_message.extend_from_slice(&DISC_META_DEPOSIT);
+        expected_message.push(relay_index);
+        expected_message.extend_from_slice(&liquidity_delta.to_le_bytes());
+        expected_message.extend_from_slice(&token_a_amount_threshold.to_le_bytes());
+        expected_message.extend_from_slice(&token_b_amount_threshold.to_le_bytes());
+        expected_message.extend_from_slice(&ctx.accounts.vault.meta_nonce.to_le_bytes());
+        expected_message.extend_from_slice(ctx.accounts.vault.key().as_ref());
+
+        verify_ed25519_signature(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.vault.authority,
+            &expected_message,
+        )?;
+
+        // Increment meta_nonce for replay protection
+        ctx.accounts.vault.meta_nonce += 1;
+
+        msg!("Meta-tx: Relay PDA {} deploying {} liquidity to Meteora", relay_index, liquidity_delta);
+
+        // Execute the CPI (same as direct variant, minus SOL wrapping)
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::AddLiquidity {
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_account: ctx.accounts.relay_token_a.to_account_info(),
+            token_b_account: ctx.accounts.relay_token_b.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            owner: ctx.accounts.relay_pda.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::add_liquidity(
+            cpi_ctx,
+            damm_v2::types::AddLiquidityParameters {
+                liquidity_delta,
+                token_a_amount_threshold,
+                token_b_amount_threshold,
+            },
+        )?;
+
+        emit!(DepositedToMeteoraEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            liquidity_delta,
+        });
+
+        Ok(())
+    }
+
+    /// Meta-tx variant of withdraw_from_meteora_damm_v2.
+    pub fn meta_withdraw_from_meteora_damm_v2(
+        ctx: Context<MetaWithdrawFromMeteoraDammV2>,
+        relay_index: u8,
+        liquidity_delta: u128,
+        token_a_amount_threshold: u64,
+        token_b_amount_threshold: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        // Build expected message
+        let mut expected_message = Vec::new();
+        expected_message.extend_from_slice(&DISC_META_WITHDRAW);
+        expected_message.push(relay_index);
+        expected_message.extend_from_slice(&liquidity_delta.to_le_bytes());
+        expected_message.extend_from_slice(&token_a_amount_threshold.to_le_bytes());
+        expected_message.extend_from_slice(&token_b_amount_threshold.to_le_bytes());
+        expected_message.extend_from_slice(&ctx.accounts.vault.meta_nonce.to_le_bytes());
+        expected_message.extend_from_slice(ctx.accounts.vault.key().as_ref());
+
+        verify_ed25519_signature(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.vault.authority,
+            &expected_message,
+        )?;
+
+        ctx.accounts.vault.meta_nonce += 1;
+
+        msg!("Meta-tx: Relay PDA {} withdrawing {} liquidity from Meteora", relay_index, liquidity_delta);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::RemoveLiquidity {
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_account: ctx.accounts.relay_token_a.to_account_info(),
+            token_b_account: ctx.accounts.relay_token_b.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            owner: ctx.accounts.relay_pda.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::remove_liquidity(
+            cpi_ctx,
+            damm_v2::types::RemoveLiquidityParameters {
+                liquidity_delta,
+                token_a_amount_threshold,
+                token_b_amount_threshold,
+            },
+        )?;
+
+        emit!(WithdrawnFromMeteoraEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            liquidity_delta,
+        });
+
+        Ok(())
+    }
+
+    /// Meta-tx variant of create_meteora_position.
+    pub fn meta_create_meteora_position(
+        ctx: Context<MetaCreateMeteoraPosition>,
+        relay_index: u8,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        // Build expected message
+        let mut expected_message = Vec::new();
+        expected_message.extend_from_slice(&DISC_META_CREATE_POSITION);
+        expected_message.push(relay_index);
+        expected_message.extend_from_slice(&ctx.accounts.vault.meta_nonce.to_le_bytes());
+        expected_message.extend_from_slice(ctx.accounts.vault.key().as_ref());
+
+        verify_ed25519_signature(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.vault.authority,
+            &expected_message,
+        )?;
+
+        ctx.accounts.vault.meta_nonce += 1;
+
+        msg!("Meta-tx: Creating Meteora position for relay PDA {}", relay_index);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::CreatePosition {
+            owner: ctx.accounts.relay_pda.to_account_info(),
+            position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            payer: ctx.accounts.relay_pda.to_account_info(),
+            token_program: ctx.accounts.token_program.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::create_position(cpi_ctx)?;
+
+        emit!(MeteoraPositionCreatedEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            pool: ctx.accounts.pool.key(),
+        });
+
+        Ok(())
+    }
+
+    /// Meta-tx variant of create_pool_via_relay.
+    pub fn meta_create_pool_via_relay(
+        ctx: Context<MetaCreatePoolViaRelay>,
+        relay_index: u8,
+        liquidity: u128,
+        sqrt_price: u128,
+        activation_point: Option<u64>,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        // Build expected message
+        let mut expected_message = Vec::new();
+        expected_message.extend_from_slice(&DISC_META_CREATE_POOL);
+        expected_message.push(relay_index);
+        expected_message.extend_from_slice(&liquidity.to_le_bytes());
+        expected_message.extend_from_slice(&sqrt_price.to_le_bytes());
+        // Option<u64> encoding: 0 tag for None, 1 tag + 8 bytes for Some
+        match activation_point {
+            None => expected_message.push(0),
+            Some(val) => {
+                expected_message.push(1);
+                expected_message.extend_from_slice(&val.to_le_bytes());
+            }
+        }
+        expected_message.extend_from_slice(&ctx.accounts.vault.meta_nonce.to_le_bytes());
+        expected_message.extend_from_slice(ctx.accounts.vault.key().as_ref());
+
+        verify_ed25519_signature(
+            &ctx.accounts.instructions_sysvar,
+            &ctx.accounts.vault.authority,
+            &expected_message,
+        )?;
+
+        ctx.accounts.vault.meta_nonce += 1;
+
+        msg!("Meta-tx: Relay PDA {} creating Meteora pool", relay_index);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::InitializePool {
+            creator: ctx.accounts.relay_pda.to_account_info(),
+            position_nft_mint: ctx.accounts.position_nft_mint.to_account_info(),
+            position_nft_account: ctx.accounts.position_nft_account.to_account_info(),
+            payer: ctx.accounts.relay_pda.to_account_info(),
+            config: ctx.accounts.config.to_account_info(),
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            position: ctx.accounts.position.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            payer_token_a: ctx.accounts.relay_token_a.to_account_info(),
+            payer_token_b: ctx.accounts.relay_token_b.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            token_2022_program: ctx.accounts.token_2022_program.to_account_info(),
+            system_program: ctx.accounts.system_program.to_account_info(),
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::initialize_pool(
+            cpi_ctx,
+            damm_v2::types::InitializePoolParameters {
+                liquidity,
+                sqrt_price,
+                activation_point,
+            },
+        )?;
+
+        emit!(PoolCreatedViaRelayEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            pool: ctx.accounts.pool.key(),
+        });
+
+        Ok(())
+    }
+}
+
+// ============================================================
+// ED25519 SIGNATURE VERIFICATION HELPER
+// ============================================================
+
+/// Verifies an Ed25519 signature by introspecting the instructions sysvar.
+/// Expects an Ed25519SigVerify precompile instruction at index 0 of the transaction.
+///
+/// The Ed25519 precompile instruction data format:
+///   - Bytes 0-1: num_signatures (u16 LE) — must be 1
+///   - Bytes 2-3: padding
+///   - Bytes 4-5: signature_offset (u16 LE)
+///   - Bytes 6-7: signature_instruction_index (u16 LE) — 0xFFFF means current
+///   - Bytes 8-9: public_key_offset (u16 LE)
+///   - Bytes 10-11: public_key_instruction_index (u16 LE)
+///   - Bytes 12-13: message_data_offset (u16 LE)
+///   - Bytes 14-15: message_data_size (u16 LE)
+///   - Bytes 16-17: message_instruction_index (u16 LE)
+///   Then the actual signature (64 bytes), pubkey (32 bytes), and message follow.
+fn verify_ed25519_signature(
+    instructions_sysvar: &AccountInfo,
+    expected_authority: &Pubkey,
+    expected_message: &[u8],
+) -> Result<()> {
+    // Load instruction at index 0
+    let ix = sysvar_instructions::load_instruction_at_checked(0, instructions_sysvar)
+        .map_err(|_| ErrorCode::MissingEd25519Instruction)?;
+
+    // Verify it's the Ed25519 precompile program
+    require!(
+        ix.program_id == ed25519_program_id(),
+        ErrorCode::MissingEd25519Instruction
+    );
+
+    // Parse the precompile instruction data
+    let data = &ix.data;
+    require!(data.len() >= 18, ErrorCode::InvalidSignature);
+
+    let num_signatures = u16::from_le_bytes([data[0], data[1]]);
+    require!(num_signatures == 1, ErrorCode::InvalidSignature);
+
+    let pubkey_offset = u16::from_le_bytes([data[8], data[9]]) as usize;
+    let message_data_offset = u16::from_le_bytes([data[12], data[13]]) as usize;
+    let message_data_size = u16::from_le_bytes([data[14], data[15]]) as usize;
+
+    // Extract and verify the public key
+    require!(
+        data.len() >= pubkey_offset + 32,
+        ErrorCode::InvalidSignature
+    );
+    let signed_pubkey = &data[pubkey_offset..pubkey_offset + 32];
+    require!(
+        signed_pubkey == expected_authority.as_ref(),
+        ErrorCode::InvalidSignature
+    );
+
+    // Extract and verify the message
+    require!(
+        data.len() >= message_data_offset + message_data_size,
+        ErrorCode::MessageMismatch
+    );
+    let signed_message = &data[message_data_offset..message_data_offset + message_data_size];
+    require!(
+        signed_message == expected_message,
+        ErrorCode::MessageMismatch
+    );
+
+    Ok(())
 }
 
 // ============================================================
@@ -1127,6 +1552,8 @@ pub struct VaultAccount {
     /// Encrypted vault state: [pending_deposits, total_liquidity, total_deposited]
     pub vault_state: [[u8; 32]; 3],
     pub nonce: u128,
+    /// Monotonic nonce for meta-transaction replay protection
+    pub meta_nonce: u64,
 }
 
 /// User position in a vault.
@@ -2218,6 +2645,316 @@ pub struct FundRelay<'info> {
 }
 
 // ============================================================
+// META-TX ACCOUNT STRUCTURES (cranker pays, authority verified via Ed25519)
+// ============================================================
+
+/// Meta-tx accounts for depositing liquidity to Meteora via Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct MetaDepositToMeteoraDammV2<'info> {
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+
+    /// CHECK: Verified via Ed25519 against vault.authority
+    pub authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// CHECK: Instructions sysvar for Ed25519 verification
+    #[account(address = sysvar_instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
+    /// Relay PDA that owns the Meteora position
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_a: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_b: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Meta-tx accounts for withdrawing liquidity from Meteora via Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct MetaWithdrawFromMeteoraDammV2<'info> {
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+
+    /// CHECK: Verified via Ed25519 against vault.authority
+    pub authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// CHECK: Instructions sysvar for Ed25519 verification
+    #[account(address = sysvar_instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_a: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_b: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Meta-tx accounts for creating a Meteora position via Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct MetaCreateMeteoraPosition<'info> {
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+
+    /// CHECK: Verified via Ed25519 against vault.authority
+    pub authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// CHECK: Instructions sysvar for Ed25519 verification
+    #[account(address = sysvar_instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
+    /// Relay PDA that will own the Meteora position and pay rent
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        mut,
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// Position NFT mint (new keypair, signer)
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut, signer)]
+    pub position_nft_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Must be Token-2022 program
+    #[account(address = token_2022_program_id())]
+    pub token_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+/// Meta-tx accounts for creating a Meteora pool via a Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct MetaCreatePoolViaRelay<'info> {
+    #[account(mut)]
+    pub cranker: Signer<'info>,
+
+    /// CHECK: Verified via Ed25519 against vault.authority
+    pub authority: UncheckedAccount<'info>,
+
+    #[account(
+        mut,
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// CHECK: Instructions sysvar for Ed25519 verification
+    #[account(address = sysvar_instructions::ID)]
+    pub instructions_sysvar: UncheckedAccount<'info>,
+
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        mut,
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut, signer)]
+    pub position_nft_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Will be initialized by DAMM v2 program
+    #[account(mut)]
+    pub position_nft_account: UncheckedAccount<'info>,
+
+    /// CHECK: Pool config account validated by DAMM v2
+    pub config: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Pool account to initialize, validated by DAMM v2
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// CHECK: Position account, validated by DAMM v2
+    #[account(mut)]
+    pub position: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Token A vault, initialized by DAMM v2
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Token B vault, initialized by DAMM v2
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_a: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub relay_token_b: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Token-2022 program
+    #[account(address = token_2022_program_id())]
+    pub token_2022_program: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
+// ============================================================
 // EVENTS
 // ============================================================
 
@@ -2314,4 +3051,12 @@ pub enum ErrorCode {
     Unauthorized,
     #[msg("Invalid relay index (must be 0-11)")]
     InvalidRelayIndex,
+    #[msg("Invalid Ed25519 signature")]
+    InvalidSignature,
+    #[msg("Missing Ed25519 precompile instruction at index 0")]
+    MissingEd25519Instruction,
+    #[msg("Signed message does not match expected message")]
+    MessageMismatch,
+    #[msg("Invalid meta nonce")]
+    InvalidMetaNonce,
 }

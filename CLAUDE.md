@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Devnet COMPLETE (16/16 tests pass)
+**Phase:** Devnet + Localnet COMPLETE (16/16 tests pass on both)
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -400,12 +400,16 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 10. **Key sync gotcha** - `arcium build`/`arcium test` run `anchor keys sync` which overwrites `declare_id!` from the keypair file. For devnet, make sure the keypair matches your deployed program ID.
 11. **Meteora uses "liquidity" not "LP tokens"** - `Position.unlocked_liquidity` is a `u128` representing pool share, not a minted token. Always use "liquidity" terminology when interacting with DAMM v2.
 12. **Circuit rename requires full rebuild** - Renaming a circuit function in `encrypted-ixs/src/lib.rs` requires `arcium build` to regenerate `.arcis`/`.hash` files, uploading the new `.arcis` to GitHub, and re-initializing the comp def on-chain (new PDA).
+13. **Never use `--skip-build` after account struct changes** - If you add/remove fields from account structs (e.g., adding `meta_nonce` to `VaultAccount`), you MUST run `arcium test` (without `--skip-build`) so the IDL is regenerated. Using `--skip-build` with a stale IDL causes `Unknown action 'undefined'` errors and MXE keygen failure (120 retries exhausted). The fix is always a full `arcium test` (no flags).
+14. **GitHub URLs work fine for localnet** - ARX Docker nodes CAN reach `raw.githubusercontent.com`. The Docker network issue was specific to catbox.moe, not external URLs in general. No need to switch to local HTTP server for localnet testing.
+15. **Kill zombie processes before re-running tests** - If `arcium test` is interrupted or run multiple times, stale mocha/validator/arcium processes pile up as zombies. Fix: `docker restart zodiac-dev` then `rm -rf /app/.anchor/test-ledger` before the next run.
+16. **Localnet test procedure** - Clean run: `docker restart zodiac-dev` → `docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger && cd /app && arcium test"`. This ensures no zombie processes, fresh ledger, full build + IDL regen, and single test runner.
 
-## Localnet Circuit Hosting (IMPORTANT)
+## Localnet Circuit Hosting (NOT NEEDED — GitHub URLs work)
 
-For localnet testing, external URLs (catbox.moe) often fail due to Docker network issues.
+GitHub raw URLs work fine from ARX Docker nodes. The catbox.moe issue was host-specific.
 
-**Solution: Host circuits locally**
+**Only use local hosting if GitHub is unreachable:**
 
 1. Start HTTP server in zodiac-dev container:
 ```bash
@@ -424,6 +428,31 @@ CircuitSource::OffChain(OffChainCircuitSource {
 ```bash
 docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*.json"
 ```
+
+## Localnet Test Results (2026-01-30)
+
+**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (localnet, with meta_nonce field)
+
+| # | Test | Status |
+|---|------|--------|
+| 1 | init_vault comp def | PASS (403ms) |
+| 2 | init_user_position comp def | PASS (405ms) |
+| 3 | deposit comp def | PASS (406ms) |
+| 4 | reveal_pending_deposits comp def | PASS (406ms) |
+| 5 | record_liquidity comp def | PASS (406ms) |
+| 6 | compute_withdrawal comp def | PASS (410ms) |
+| 7 | get_user_position comp def | PASS (416ms) |
+| 8 | clear_position comp def | PASS (407ms) |
+| 9 | creates a new vault | PASS (884ms) |
+| 10 | creates a user position | PASS (813ms) |
+| 11 | deposits tokens (encrypted) | PASS (2444ms) |
+| 12 | reveals pending deposits | PASS (907ms) |
+| 13 | records liquidity from Meteora | PASS (795ms) |
+| 14 | computes withdrawal for user | PASS (1206ms) |
+| 15 | clears user position | PASS (800ms) |
+| 16 | gets user position | PASS (1200ms) |
+
+**16 passing (14s)** — GitHub circuit URLs work fine from ARX Docker nodes.
 
 ## Devnet Test Results (2026-01-29)
 
