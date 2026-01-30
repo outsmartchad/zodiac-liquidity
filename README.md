@@ -1,6 +1,6 @@
 # Zodiac Liquidity
 
-Privacy-focused liquidity provision for [Meteora DAMM v2](https://docs.meteora.ag/) pools using [Arcium](https://arcium.com/)'s MPC and zk mixer.
+Privacy protocol for LPers using Arcium MPC and zk mixer. Supports DAMM v2 pools (DLMM coming soon).
 
 ## The Problem
 
@@ -8,17 +8,11 @@ On-chain liquidity provision is fully transparent. When you deposit into a pool,
 
 ## How Zodiac Solves It
 
-Zodiac combines **multi-party computation (MPC)** and a **ZK mixer** to achieve full privacy for liquidity provision. Arcium's MPC network keeps every user's deposit amount and LP position encrypted on-chain — no single party, not even the protocol operator, can read a user's position. The ZK mixer breaks the on-chain link between a user's wallet and their deposit, so no one can trace who deposited what.
+Zodiac combines **MPC encryption** and a **ZK mixer** for full LP privacy.
 
-### Encryption Architecture
-
-All vault and user position state is encrypted by the Arcium MPC network. The decryption key is split across multiple MPC nodes — no single party can read the data, not even the protocol operator.
-
-- **Identity unlinkability** (ZK mixer + ephemeral wallets) — users deposit into a ZK mixer from their real wallet and withdraw to a fresh ephemeral wallet using a zero-knowledge proof. The mixer breaks the on-chain link between depositor and recipient. Each ephemeral wallet is single-use and closed after one operation, preventing cross-operation tracing.
-
-- **Protocol state** (vault totals, user positions) — encrypted under the MPC network's collective key. Only a quorum of MPC nodes executing a program-authorized circuit can decrypt, compute, and re-encrypt.
-
-- **User-facing results** (withdrawal amount, position query) — the MPC network computes the answer, then re-encrypts it for the requesting user's public key. Only that user can decrypt the result.
+- **Encrypted state** — All deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
+- **Identity unlinkability** — A ZK mixer breaks the link between user wallets and deposits. Single-use ephemeral wallets prevent cross-operation tracing.
+- **User-only results** — When a user queries their position or withdraws, the MPC network re-encrypts the result for that user's key. Only they can read it.
 
 ### What's Hidden vs Visible
 
@@ -57,11 +51,9 @@ Ephemeral wallet --> Zodiac vault (Arcium computes user's share)
 
 **Three layers of unlinkability:**
 
-1. **ZK Mixer** — Breaks the link between user wallet and deposit. Users deposit into the mixer from their real wallet, then withdraw to a fresh ephemeral wallet using a ZK proof. No one can connect the two.
-
-2. **Ephemeral Wallets** — Each Meteora CPI operation uses a one-time ephemeral wallet PDA. The authority registers it, it executes one operation, then it's closed. No cross-operation linkability.
-
-3. **Relay PDA** — The only entity that interacts with Meteora. It holds a single aggregated position across all users. Individual users never touch the pool directly, so their positions cannot be linked to specific pool operations.
+1. **ZK Mixer** — Breaks the wallet-to-deposit link via zero-knowledge proofs.
+2. **Ephemeral Wallets** — Single-use wallets per operation, closed after one CPI.
+3. **Relay PDA** — Single aggregated Meteora position across all users. No individual user touches the pool.
 
 ## Tech Stack
 
