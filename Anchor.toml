@@ -8,9 +8,11 @@ skip-lint = false
 
 [programs.devnet]
 zodiac_liquidity = "5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu"
+zodiac_mixer = "ZMixer1111111111111111111111111111111111111"
 
 [programs.localnet]
 zodiac_liquidity = "5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu"
+zodiac_mixer = "H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23"
 
 [registry]
 url = "https://api.apr.dev"

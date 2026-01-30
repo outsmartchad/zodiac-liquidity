@@ -1,6 +1,6 @@
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, Keypair, SystemProgram, Ed25519Program, SYSVAR_INSTRUCTIONS_PUBKEY } from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
 import { ZodiacLiquidity } from "../target/types/zodiac_liquidity";
 import { randomBytes, createHash } from "crypto";
 import nacl from "tweetnacl";
@@ -924,6 +924,841 @@ describe("zodiac-liquidity", () => {
         posTx.meta.logMessages.forEach((l) => console.log("  " + l));
       }
       console.log("--- End User Position Data ---\n");
+    });
+  });
+
+  describe("Relay Transfer to Destination", () => {
+    it("transfers tokens from relay PDA to destination (authority)", async () => {
+      const relayIndex = 0;
+      const transferAmount = 100_000; // 0.0001 tokens (9 decimals)
+
+      // Derive relay PDA
+      const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+      console.log("Relay PDA:", relayPda.toString());
+
+      // Create relay token account (owned by relay PDA)
+      const relayTokenKp = Keypair.generate();
+      const relayTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        relayPda, // authority = relay PDA
+        relayTokenKp, // keypair to avoid ATA off-curve error
+      );
+      console.log("Relay token account:", relayTokenAccount.toString());
+
+      // Create destination token account (e.g. ephemeral wallet)
+      const ephemeralWallet = Keypair.generate();
+      // Fund ephemeral wallet with SOL for rent
+      const airdropSig = await provider.connection.requestAirdrop(
+        ephemeralWallet.publicKey,
+        1_000_000_000
+      );
+      await provider.connection.confirmTransaction(airdropSig, "confirmed");
+
+      const destinationTokenAccount = await createAccount(
+        provider.connection,
+        ephemeralWallet,
+        tokenMint,
+        ephemeralWallet.publicKey,
+      );
+      console.log("Destination token account:", destinationTokenAccount.toString());
+
+      // Fund relay token account via fund_relay instruction
+      // First create an authority token account and mint some tokens
+      const authorityTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        owner.publicKey,
+      );
+
+      // Mint tokens to authority
+      await mintTo(
+        provider.connection,
+        owner,
+        tokenMint,
+        authorityTokenAccount.address,
+        owner,
+        transferAmount * 2,
+      );
+
+      // Wait for blockhash to refresh after account creation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      // Fund relay via fund_relay instruction
+      await program.methods
+        .fundRelay(relayIndex, new anchor.BN(transferAmount))
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          relayPda: relayPda,
+          authorityTokenAccount: authorityTokenAccount.address,
+          relayTokenAccount: relayTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Funded relay with", transferAmount, "tokens");
+
+      // Verify relay has tokens
+      const relayAccountBefore = await getAccount(provider.connection, relayTokenAccount);
+      console.log("Relay balance before transfer:", relayAccountBefore.amount.toString());
+      expect(Number(relayAccountBefore.amount)).to.equal(transferAmount);
+
+      // Execute relay_transfer_to_destination
+      const sig = await program.methods
+        .relayTransferToDestination(relayIndex, new anchor.BN(transferAmount))
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          relayPda: relayPda,
+          relayTokenAccount: relayTokenAccount,
+          destinationTokenAccount: destinationTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Relay transfer tx:", sig);
+
+      // Verify destination received tokens
+      const destAccountAfter = await getAccount(provider.connection, destinationTokenAccount);
+      console.log("Destination balance after transfer:", destAccountAfter.amount.toString());
+      expect(Number(destAccountAfter.amount)).to.equal(transferAmount);
+
+      // Verify relay is now empty
+      const relayAccountAfter = await getAccount(provider.connection, relayTokenAccount);
+      expect(Number(relayAccountAfter.amount)).to.equal(0);
+    });
+
+    it("fails relay transfer with wrong authority", async () => {
+      const relayIndex = 1;
+      const wrongAuthority = Keypair.generate();
+
+      // Fund wrong authority with SOL
+      const airdropSig = await provider.connection.requestAirdrop(
+        wrongAuthority.publicKey,
+        1_000_000_000
+      );
+      await provider.connection.confirmTransaction(airdropSig, "confirmed");
+
+      const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+      // Create relay token account (keypair to avoid ATA off-curve error)
+      const relayTokenKp = Keypair.generate();
+      const relayTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        relayPda,
+        relayTokenKp,
+      );
+
+      // Create destination
+      const destTokenKp = Keypair.generate();
+      const destTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        wrongAuthority.publicKey,
+        destTokenKp,
+      );
+
+      // Wait for blockhash to refresh after account creation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        await program.methods
+          .relayTransferToDestination(relayIndex, new anchor.BN(100))
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            relayTokenAccount: relayTokenAccount,
+            destinationTokenAccount: destTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([wrongAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unauthorized");
+      } catch (err: any) {
+        console.log("Expected error for wrong authority:", err.message?.substring(0, 100));
+        expect(err.message || err.toString()).to.include("Unauthorized");
+      }
+    });
+
+    it("fails relay transfer with invalid relay index", async () => {
+      const invalidRelayIndex = 12; // NUM_RELAYS = 12, so index 12 is invalid
+
+      const relayPda = deriveRelayPda(vaultPda, invalidRelayIndex, program.programId);
+
+      // Create dummy accounts (keypair to avoid ATA off-curve error)
+      const relayTokenKp = Keypair.generate();
+      const relayTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        relayPda,
+        relayTokenKp,
+      );
+
+      const destTokenKp = Keypair.generate();
+      const destTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        owner.publicKey,
+        destTokenKp,
+      );
+
+      // Wait for blockhash to refresh after account creation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        await program.methods
+          .relayTransferToDestination(invalidRelayIndex, new anchor.BN(100))
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            relayTokenAccount: relayTokenAccount,
+            destinationTokenAccount: destTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with invalid relay index");
+      } catch (err: any) {
+        console.log("Expected error for invalid relay index:", err.message?.substring(0, 100));
+        expect(err.message || err.toString()).to.include("InvalidRelayIndex");
+      }
+    });
+  });
+
+  // ============================================================
+  // FUND RELAY TESTS
+  // ============================================================
+  describe("Fund Relay", () => {
+    it("funds a relay PDA token account", async () => {
+      const relayIndex = 2;
+      const fundAmount = 500_000;
+
+      const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+      // Create relay token account (keypair to avoid ATA off-curve error)
+      const relayTokenKp = Keypair.generate();
+      const relayTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        relayPda,
+        relayTokenKp,
+      );
+
+      // Create authority token account and mint tokens
+      const authorityTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        owner.publicKey,
+      );
+
+      await mintTo(
+        provider.connection,
+        owner,
+        tokenMint,
+        authorityTokenAccount.address,
+        owner,
+        fundAmount,
+      );
+
+      // Wait for blockhash to refresh after account creation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      const sig = await program.methods
+        .fundRelay(relayIndex, new anchor.BN(fundAmount))
+        .accounts({
+          authority: owner.publicKey,
+          vault: vaultPda,
+          relayPda: relayPda,
+          authorityTokenAccount: authorityTokenAccount.address,
+          relayTokenAccount: relayTokenAccount,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+
+      console.log("Fund relay tx:", sig);
+
+      const relayAccount = await getAccount(provider.connection, relayTokenAccount);
+      expect(Number(relayAccount.amount)).to.equal(fundAmount);
+      console.log("Relay PDA", relayIndex, "funded with", fundAmount, "tokens");
+    });
+
+    it("fails fund_relay with wrong authority", async () => {
+      const relayIndex = 3;
+      const wrongAuthority = Keypair.generate();
+
+      const airdropSig = await provider.connection.requestAirdrop(
+        wrongAuthority.publicKey,
+        1_000_000_000
+      );
+      await provider.connection.confirmTransaction(airdropSig, "confirmed");
+
+      const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+      const relayTokenKp = Keypair.generate();
+      const relayTokenAccount = await createAccount(
+        provider.connection,
+        owner,
+        tokenMint,
+        relayPda,
+        relayTokenKp,
+      );
+
+      // Create wrong authority's token account
+      const wrongAuthorityTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        wrongAuthority,
+        tokenMint,
+        wrongAuthority.publicKey,
+      );
+
+      // Wait for blockhash to refresh after account creation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
+      try {
+        await program.methods
+          .fundRelay(relayIndex, new anchor.BN(100))
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            authorityTokenAccount: wrongAuthorityTokenAccount.address,
+            relayTokenAccount: relayTokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([wrongAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unauthorized");
+      } catch (err: any) {
+        console.log("Expected error for wrong authority:", err.message?.substring(0, 100));
+        expect(err.message || err.toString()).to.include("Unauthorized");
+      }
+    });
+  });
+
+  // ============================================================
+  // METEORA CPI TESTS (require DAMM v2 program on localnet)
+  // These tests will skip gracefully if DAMM v2 is not deployed.
+  // ============================================================
+  describe("Meteora CPI - Create Customizable Pool via Relay", () => {
+    let tokenA: PublicKey;
+    let tokenB: PublicKey;
+    let relayPda: PublicKey;
+    const relayIndex = 4;
+    let setupFailed = false;
+
+    before(async () => {
+      try {
+        // Check if DAMM v2 is deployed
+        const dammInfo = await provider.connection.getAccountInfo(DAMM_V2_PROGRAM_ID);
+        if (!dammInfo) {
+          console.log("DAMM v2 not deployed on localnet, skipping CPI tests");
+          setupFailed = true;
+          return;
+        }
+
+        // Create two token mints for the pool (token A < token B lexicographically)
+        const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+        const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+        tokenA = minKey(mintA, mintB);
+        tokenB = maxKey(mintA, mintB);
+        console.log("Token A:", tokenA.toString());
+        console.log("Token B:", tokenB.toString());
+
+        relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+        // Fund relay PDA with SOL for rent
+        const transferSig = await provider.connection.requestAirdrop(relayPda, 5_000_000_000);
+        await provider.connection.confirmTransaction(transferSig, "confirmed");
+
+        // Create relay token accounts for A and B (keypair to avoid ATA off-curve error)
+        const relayTokenAKp = Keypair.generate();
+        const relayTokenA = await createAccount(
+          provider.connection,
+          owner,
+          tokenA,
+          relayPda,
+          relayTokenAKp,
+        );
+        const relayTokenBKp = Keypair.generate();
+        const relayTokenB = await createAccount(
+          provider.connection,
+          owner,
+          tokenB,
+          relayPda,
+          relayTokenBKp,
+        );
+
+        // Wait for accounts to settle
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Fund relay with tokens via authority
+        const authTokenA = await getOrCreateAssociatedTokenAccount(
+          provider.connection, owner, tokenA, owner.publicKey
+        );
+        const authTokenB = await getOrCreateAssociatedTokenAccount(
+          provider.connection, owner, tokenB, owner.publicKey
+        );
+
+        await mintTo(provider.connection, owner, tokenA, authTokenA.address, owner, 10_000_000_000);
+        await mintTo(provider.connection, owner, tokenB, authTokenB.address, owner, 10_000_000_000);
+
+        // Wait before fund_relay calls
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // Fund relay token accounts via fund_relay
+        await program.methods
+          .fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            authorityTokenAccount: authTokenA.address,
+            relayTokenAccount: relayTokenA,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+
+        await program.methods
+          .fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            authorityTokenAccount: authTokenB.address,
+            relayTokenAccount: relayTokenB,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Relay PDA funded with token A and B for pool creation");
+      } catch (err: any) {
+        console.log("Meteora CPI setup failed (DAMM v2 likely not deployed):", err.message?.substring(0, 100));
+        setupFailed = true;
+      }
+    });
+
+    it("creates a customizable pool via relay PDA", async function () {
+      if (setupFailed) { this.skip(); return; }
+      const positionNftMint = Keypair.generate();
+
+      // Derive pool PDA using customizable_pool seed
+      const [poolPda] = PublicKey.findProgramAddressSync(
+        [
+          Buffer.from("customizable_pool"),
+          maxKey(tokenA, tokenB).toBuffer(),
+          minKey(tokenA, tokenB).toBuffer(),
+        ],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Derive position PDA
+      const [positionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), positionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Derive position NFT account PDA
+      const [positionNftAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position_nft_account"), positionNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Derive token vaults
+      const [tokenAVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), tokenA.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [tokenBVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), tokenB.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Derive event authority
+      const [eventAuthority] = PublicKey.findProgramAddressSync(
+        [EVENT_AUTHORITY_SEED],
+        DAMM_V2_PROGRAM_ID
+      );
+
+      // Relay token accounts
+      const relayTokenA = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, tokenA, relayPda, true
+      );
+      const relayTokenB = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, tokenB, relayPda, true
+      );
+
+      // Pool fee parameters (minimal fees for testing)
+      const poolFees = {
+        baseFee: {
+          cliffFeeNumerator: new anchor.BN(1000),
+          firstFactor: 0,
+          secondFactor: Array(8).fill(0),
+          thirdFactor: new anchor.BN(0),
+          baseFeeMode: 0,
+        },
+        padding: [0, 0, 0],
+        dynamicFee: null,
+      };
+
+      // Use Meteora SDK price constants
+      const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9); // 1:1 price
+
+      try {
+        const sig = await program.methods
+          .createCustomizablePoolViaRelay(
+            relayIndex,
+            poolFees,
+            new anchor.BN(MIN_SQRT_PRICE),   // sqrt_min_price
+            new anchor.BN(MAX_SQRT_PRICE),    // sqrt_max_price
+            false,                             // has_alpha_vault
+            new anchor.BN(1_000_000),         // liquidity
+            sqrtPrice,                         // sqrt_price
+            0,                                 // activation_type (slot)
+            0,                                 // collect_fee_mode
+            null,                              // activation_point (None = immediate)
+          )
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: relayPda,
+            positionNftMint: positionNftMint.publicKey,
+            positionNftAccount: positionNftAccount,
+            poolAuthority: POOL_AUTHORITY,
+            pool: poolPda,
+            position: positionPda,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            tokenAVault: tokenAVault,
+            tokenBVault: tokenBVault,
+            relayTokenA: relayTokenA.address,
+            relayTokenB: relayTokenB.address,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, positionNftMint])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Create customizable pool tx:", sig);
+
+        // Verify pool was created by checking the account exists
+        const poolInfo = await provider.connection.getAccountInfo(poolPda);
+        expect(poolInfo).to.not.be.null;
+        console.log("Pool account size:", poolInfo!.data.length, "bytes");
+        console.log("Pool created at:", poolPda.toString());
+      } catch (err: any) {
+        // If DAMM v2 is not deployed on localnet, skip gracefully
+        if (err.message?.includes("Program") && err.message?.includes("not found")) {
+          console.log("DAMM v2 program not deployed on localnet, skipping CPI test");
+          return;
+        }
+        throw err;
+      }
+    });
+
+    it("fails create_customizable_pool with wrong authority", async function () {
+      if (setupFailed) { this.skip(); return; }
+      const wrongAuthority = Keypair.generate();
+      const airdropSig = await provider.connection.requestAirdrop(
+        wrongAuthority.publicKey, 1_000_000_000
+      );
+      await provider.connection.confirmTransaction(airdropSig, "confirmed");
+
+      const positionNftMint = Keypair.generate();
+      const wrongRelayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+      const poolFees = {
+        baseFee: {
+          cliffFeeNumerator: new anchor.BN(1000),
+          firstFactor: 0,
+          secondFactor: Array(8).fill(0),
+          thirdFactor: new anchor.BN(0),
+          baseFeeMode: 0,
+        },
+        padding: [0, 0, 0],
+        dynamicFee: null,
+      };
+
+      try {
+        await program.methods
+          .createCustomizablePoolViaRelay(
+            relayIndex,
+            poolFees,
+            new anchor.BN(MIN_SQRT_PRICE),
+            new anchor.BN(MAX_SQRT_PRICE),
+            false,
+            new anchor.BN(1_000_000),
+            new anchor.BN(MIN_SQRT_PRICE),
+            0, 0, null,
+          )
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            relayPda: wrongRelayPda,
+            positionNftMint: positionNftMint.publicKey,
+            positionNftAccount: PublicKey.default,
+            poolAuthority: POOL_AUTHORITY,
+            pool: PublicKey.default,
+            position: PublicKey.default,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            tokenAVault: PublicKey.default,
+            tokenBVault: PublicKey.default,
+            relayTokenA: PublicKey.default,
+            relayTokenB: PublicKey.default,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: PublicKey.default,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([wrongAuthority, positionNftMint])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unauthorized");
+      } catch (err: any) {
+        console.log("Expected error for wrong authority:", err.message?.substring(0, 100));
+        expect(err.message || err.toString()).to.include("Unauthorized");
+      }
+    });
+
+    it("fails create_customizable_pool with invalid relay index", async function () {
+      if (setupFailed) { this.skip(); return; }
+      const invalidRelayIndex = 12;
+      const positionNftMint = Keypair.generate();
+      const invalidRelayPda = deriveRelayPda(vaultPda, invalidRelayIndex, program.programId);
+
+      const poolFees = {
+        baseFee: {
+          cliffFeeNumerator: new anchor.BN(1000),
+          firstFactor: 0,
+          secondFactor: Array(8).fill(0),
+          thirdFactor: new anchor.BN(0),
+          baseFeeMode: 0,
+        },
+        padding: [0, 0, 0],
+        dynamicFee: null,
+      };
+
+      try {
+        await program.methods
+          .createCustomizablePoolViaRelay(
+            invalidRelayIndex,
+            poolFees,
+            new anchor.BN(MIN_SQRT_PRICE),
+            new anchor.BN(MAX_SQRT_PRICE),
+            false,
+            new anchor.BN(1_000_000),
+            new anchor.BN(MIN_SQRT_PRICE),
+            0, 0, null,
+          )
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda: invalidRelayPda,
+            positionNftMint: positionNftMint.publicKey,
+            positionNftAccount: PublicKey.default,
+            poolAuthority: POOL_AUTHORITY,
+            pool: PublicKey.default,
+            position: PublicKey.default,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            tokenAVault: PublicKey.default,
+            tokenBVault: PublicKey.default,
+            relayTokenA: PublicKey.default,
+            relayTokenB: PublicKey.default,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority: PublicKey.default,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, positionNftMint])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with invalid relay index");
+      } catch (err: any) {
+        console.log("Expected error for invalid relay index:", err.message?.substring(0, 100));
+        expect(err.message || err.toString()).to.include("InvalidRelayIndex");
+      }
+    });
+  });
+
+  // ============================================================
+  // CREATE METEORA POSITION TESTS
+  // ============================================================
+  describe("Meteora CPI - Create Position via Relay", () => {
+    it("creates a Meteora position for relay PDA", async function () {
+      // Check if DAMM v2 is deployed
+      const dammInfo = await provider.connection.getAccountInfo(DAMM_V2_PROGRAM_ID);
+      if (!dammInfo) {
+        console.log("DAMM v2 not deployed on localnet, skipping CPI test");
+        this.skip();
+        return;
+      }
+
+      const relayIndex = 5;
+      const relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+      // Fund relay PDA with SOL for rent
+      const transferSig = await provider.connection.requestAirdrop(relayPda, 5_000_000_000);
+      await provider.connection.confirmTransaction(transferSig, "confirmed");
+
+      // We need an existing pool for this. Create two mints and a customizable pool first.
+      const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+      const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+      const tA = minKey(mintA, mintB);
+      const tB = maxKey(mintA, mintB);
+
+      // Create relay token accounts and fund them
+      const relayTokenAKp = Keypair.generate();
+      const relayTokenA = await createAccount(provider.connection, owner, tA, relayPda, relayTokenAKp);
+      const relayTokenBKp = Keypair.generate();
+      const relayTokenB = await createAccount(provider.connection, owner, tB, relayPda, relayTokenBKp);
+
+      const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tA, owner.publicKey);
+      const authTokenB = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tB, owner.publicKey);
+      await mintTo(provider.connection, owner, tA, authTokenA.address, owner, 10_000_000_000);
+      await mintTo(provider.connection, owner, tB, authTokenB.address, owner, 10_000_000_000);
+
+      await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+        .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenA, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([owner]).rpc({ commitment: "confirmed" });
+      await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+        .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenB.address, relayTokenAccount: relayTokenB, tokenProgram: TOKEN_PROGRAM_ID })
+        .signers([owner]).rpc({ commitment: "confirmed" });
+
+      // First create a pool via relay using customizable (no config needed)
+      const poolNftMint = Keypair.generate();
+      const [poolPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("customizable_pool"), maxKey(tA, tB).toBuffer(), minKey(tA, tB).toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [poolPosition] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), poolNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [poolNftAccount] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position_nft_account"), poolNftMint.publicKey.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [tokenAVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), tA.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [tokenBVault] = PublicKey.findProgramAddressSync(
+        [Buffer.from("token_vault"), tB.toBuffer(), poolPda.toBuffer()],
+        DAMM_V2_PROGRAM_ID
+      );
+      const [eventAuthority] = PublicKey.findProgramAddressSync(
+        [EVENT_AUTHORITY_SEED], DAMM_V2_PROGRAM_ID
+      );
+
+      const poolFees = {
+        baseFee: { cliffFeeNumerator: new anchor.BN(1000), firstFactor: 0, secondFactor: Array(8).fill(0), thirdFactor: new anchor.BN(0), baseFeeMode: 0 },
+        padding: [0, 0, 0],
+        dynamicFee: null,
+      };
+
+      const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
+
+      try {
+        // Create pool first
+        await program.methods
+          .createCustomizablePoolViaRelay(
+            relayIndex, poolFees,
+            new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
+            false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
+          )
+          .accounts({
+            authority: owner.publicKey, vault: vaultPda, relayPda,
+            positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
+            poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
+            tokenAMint: tA, tokenBMint: tB,
+            tokenAVault, tokenBVault,
+            relayTokenA, relayTokenB,
+            tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, poolNftMint])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Pool created for position test");
+
+        // Now create a new position on that pool
+        const posNftMint = Keypair.generate();
+        const [positionPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        const [posNftAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position_nft_account"), posNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+
+        // Derive relay position tracker PDA
+        const [relayPositionTracker] = PublicKey.findProgramAddressSync(
+          [Buffer.from("relay_position"), vaultPda.toBuffer(), Buffer.from([relayIndex]), poolPda.toBuffer()],
+          program.programId
+        );
+
+        const sig = await program.methods
+          .createMeteoraPosition(relayIndex)
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda,
+            relayPositionTracker,
+            positionNftMint: posNftMint.publicKey,
+            positionNftAccount: posNftAccount,
+            pool: poolPda,
+            position: positionPda,
+            poolAuthority: POOL_AUTHORITY,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, posNftMint])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Create Meteora position tx:", sig);
+
+        // Verify position tracker was created
+        const tracker = await program.account.relayPositionTracker.fetch(relayPositionTracker);
+        expect(tracker.vault.toString()).to.equal(vaultPda.toString());
+        expect(tracker.relayIndex).to.equal(relayIndex);
+        expect(tracker.pool.toString()).to.equal(poolPda.toString());
+        expect(tracker.positionNftMint.toString()).to.equal(posNftMint.publicKey.toString());
+        console.log("Position tracker verified");
+      } catch (err: any) {
+        if (err.message?.includes("Program") && err.message?.includes("not found")) {
+          console.log("DAMM v2 program not deployed on localnet, skipping CPI test");
+          return;
+        }
+        throw err;
+      }
     });
   });
 

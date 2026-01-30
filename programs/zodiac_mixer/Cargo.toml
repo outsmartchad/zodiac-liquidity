@@ -1,0 +1,39 @@
+[package]
+name = "zodiac_mixer"
+version = "0.1.0"
+description = "ZK mixer for identity privacy in Zodiac Liquidity protocol"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "zodiac_mixer"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+localnet = []
+devnet = []
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }
+anchor-spl = { workspace = true }
+bytemuck = { workspace = true }
+light-poseidon = "0.4.0"
+light-hasher = "4.0.0"
+num-bigint = "0.4.4"
+ark-bn254 = { version = "0.5.0", features = [] }
+ark-ff = { version = "0.5.0", features = [] }
+ark-serialize = { version = "0.5.0", features = [] }
+thiserror = "1.0.69"
+solana-bn254 = "2.2.2"
+solana-program = "2.2.2"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

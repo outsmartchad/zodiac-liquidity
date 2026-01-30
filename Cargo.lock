@@ -2300,6 +2300,48 @@ dependencies = [
 ]
 
 [[package]]
+name = "light-hasher"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7b8b99f626dbfe0e9731a214e2b2e8990341f5fdb249744661ab7f3029d9859"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "arrayvec",
+ "borsh 0.10.4",
+ "light-poseidon 0.3.0",
+ "num-bigint 0.4.6",
+ "sha2 0.10.9",
+ "sha3",
+ "solana-nostd-keccak",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "light-poseidon"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39e3d87542063daaccbfecd78b60f988079b6ec4e089249658b9455075c78d42"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "num-bigint 0.4.6",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "light-poseidon"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "47a1ccadd0bb5a32c196da536fd72c59183de24a055f6bf0513bf845fefab862"
+dependencies = [
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "num-bigint 0.4.6",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3863,6 +3905,15 @@ dependencies = [
  "solana-hash",
  "solana-pubkey",
  "solana-sha256-hasher",
+]
+
+[[package]]
+name = "solana-nostd-keccak"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8ced70920435b1baa58f76e6f84bbc1110ddd1d6161ec76b6d731ae8431e9c4"
+dependencies = [
+ "sha3",
 ]
 
 [[package]]
@@ -5600,4 +5651,22 @@ dependencies = [
  "arcium-client",
  "arcium-macros",
  "bytemuck",
+]
+
+[[package]]
+name = "zodiac_mixer"
+version = "0.1.0"
+dependencies = [
+ "anchor-lang",
+ "anchor-spl",
+ "ark-bn254 0.5.0",
+ "ark-ff 0.5.0",
+ "ark-serialize 0.5.0",
+ "bytemuck",
+ "light-hasher",
+ "light-poseidon 0.4.0",
+ "num-bigint 0.4.6",
+ "solana-bn254",
+ "solana-program",
+ "thiserror 1.0.69",
 ]
