@@ -1794,7 +1794,8 @@ describe("zodiac-liquidity", () => {
         console.log("Pool created for position test");
 
         // Wait for fresh blockhash after pool creation (previous setup exhausts blockhash lifetime)
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // Devnet needs longer wait due to slower block times
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
         // Now create a new position on that pool
         const posNftMint = Keypair.generate();
