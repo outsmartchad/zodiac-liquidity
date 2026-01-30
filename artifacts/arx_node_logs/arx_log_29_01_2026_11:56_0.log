@@ -1,0 +1,301 @@
+2026-01-29T11:56:01.835817Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=0
+2026-01-29T11:56:02.046607Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-29T11:56:02.052571Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: BtQwsU4iWZboBHfBDMUq6URaR2cSiEjHke3CY15Cg5yJ
+2026-01-29T11:56:02.052819Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K
+2026-01-29T11:56:02.052836Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T11:56:02.052899Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-29T11:56:02.053596Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-29T11:56:02.054097Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-29T11:56:02.054112Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-29T11:56:02.054211Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-29T11:56:02.054336Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-29T11:56:02.054468Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-29T11:56:02.054519Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-29T11:56:02.054539Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-29T11:56:02.054664Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-29T11:56:02.056479Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T11:56:02.056500Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T11:56:02.056572Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-29T11:56:02.087738Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-29T11:56:02.088136Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-29T11:56:02.088629Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-29T11:56:02.055171Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-29T11:56:02.092012Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T11:56:02.092025Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T11:56:02.095816Z DEBUG arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:136: Node is already active, skipping activation
+2026-01-29T11:56:02.095855Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-29T11:56:02.095869Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-29T11:56:02.098595Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:02.101304Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:02.103999Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:02.104078Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T11:56:02.104140Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:132: Execpool contains the same computations, skipping update
+2026-01-29T11:56:02.104720Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:02.104831Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:02.104847Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:06.191375Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:06.191600Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:06.196783Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T11:56:06.196847Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [2340910442285671110]
+2026-01-29T11:56:06.196880Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.196958Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:06.197026Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 2340910442285671110 with status (index: 4, slot: 935)
+2026-01-29T11:56:06.197051Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.197059Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 2340910442285671110 with status (index: 4, slot: 935)
+2026-01-29T11:56:06.199996Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.200041Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0) inputs
+2026-01-29T11:56:06.200053Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.200131Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.200189Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: 9bspEcvtsGjP9quzBCSVH4H7vrQzVkUPwp3eoxLdKu8S
+2026-01-29T11:56:06.201403Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:06.201451Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:06.201579Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/init_vault.arcis
+2026-01-29T11:56:06.348398Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo 9bspEcvtsGjP9quzBCSVH4H7vrQzVkUPwp3eoxLdKu8S
+2026-01-29T11:56:06.348454Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo 9bspEcvtsGjP9quzBCSVH4H7vrQzVkUPwp3eoxLdKu8S
+2026-01-29T11:56:06.348484Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.348494Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.348528Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0))
+2026-01-29T11:56:06.348583Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T11:56:06.352569Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0))
+2026-01-29T11:56:06.356645Z DEBUG arx::units::online_phase_unit::preprocessing_bundler: arx/src/units/online_phase_unit/preprocessing_bundler.rs:104: TD registration connection attempt 1 failed with error Os { code: 111, kind: ConnectionRefused, message: "Connection refused" }, retrying in 100ms
+2026-01-29T11:56:06.458340Z DEBUG arx::units::online_phase_unit::preprocessing_bundler: arx/src/units/online_phase_unit/preprocessing_bundler.rs:46: Protocol 147438283457911433340656051057242145556 registered successfully
+2026-01-29T11:56:06.461607Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:343: Created new preprocessing bundler for base_id 147438283457911433340656051057242145556, cache size: 1
+2026-01-29T11:56:06.768577Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:436: Processing Cerberus computation (166871026314494132994155194339780991771)
+2026-01-29T11:56:06.824196Z DEBUG arx::coordinator: arx/src/coordinator.rs:619: Coordinator received online unit output: ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.824242Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.824252Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [123, 206, 169, 88, 18, 184, 154, 118, 62, 240, 99, 120, 123, 20, 51, 244, 78, 201, 240, 159, 22, 22, 75, 65, 117, 128, 32, 105, 117, 25, 162, 102, 248, 91, 13, 16, 52, 31, 217, 16, 181, 170, 197, 140, 239, 154, 199, 47, 175, 92, 240, 224, 185, 99, 48, 61, 213, 221, 31, 165, 132, 162, 172, 177, 28, 88, 200, 72, 239, 229, 249, 233, 22, 232, 39, 100, 52, 201, 246, 99, 224, 237, 115, 23, 247, 59, 76, 4, 228, 151, 119, 26, 221, 103, 175, 48, 19, 72, 123, 248, 69, 125, 6, 172, 153, 69, 194, 21, 80, 147, 28, 97, 167, 3, 0, 0, 0, 0, 0, 0, 4, 0]
+2026-01-29T11:56:06.824262Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:140: Processing outputed computation
+2026-01-29T11:56:06.824657Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 2340910442285671110, our signature will be stored but not aggregated
+2026-01-29T11:56:06.824895Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.101:59964
+2026-01-29T11:56:06.824921Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.101:8002
+2026-01-29T11:56:06.825002Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 2340910442285671110
+2026-01-29T11:56:06.825014Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 2340910442285671110 (2/2)
+2026-01-29T11:56:06.825252Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 2340910442285671110
+2026-01-29T11:56:06.825269Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.825287Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T11:56:06.825637Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 166871026314494132994155194339780991771 (cluster_offset: 0)
+2026-01-29T11:56:06.835775Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:409: Transaction simulation consumed 120338 compute units
+2026-01-29T11:56:06.836213Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:236: Fee calculation: base_fee=5000, compute_units=120338, priority_fee=0, total_fee=5000, fee_variance_buffer=1000, concurrent_callback_buffer=50000
+2026-01-29T11:56:06.836574Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:376: Fresh balance range: fresh_balance=999999975000, min=999999919000, max=999999971000, total_fee=5000, staleness_reduction=true
+2026-01-29T11:56:06.993041Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:06.993146Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:06.997053Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T11:56:06.997092Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T11:56:06.997104Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:06.997115Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 2340910442285671110
+|-> prefetch    : +0ms
+|-> prefetched  : +151ms
+|-> execute     : +0ms
+|-> output      : +627ms
+|-> signed      : +0ms
+|-> executed    : +171ms
+
+2026-01-29T11:56:06.997177Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 2340910442285671110
+2026-01-29T11:56:06.997198Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.997208Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:06.997214Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:306: Computation executed and removed from cache: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:07.001469Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:07.001534Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:07.340382Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:07.340956Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:07.341033Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:784: Sent callback computation tx for mxe 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K with sig uUnLRBeyMV6RrzsSn5KAVjmsjGurcLqu4w9p3qjFgxkX41Z4mRMF5z7UoFLWNZtujNy39P9CwLbbmK2Cgz1ZWTu
+2026-01-29T11:56:07.341102Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:07.341118Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T11:56:07.341125Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:07.341144Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:313: Computation info not found in cache: ArxComputationReference: 2340910442285671110
+2026-01-29T11:56:07.397272Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T11:56:07.397334Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [4163365956343930020]
+2026-01-29T11:56:07.397362Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.397386Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:07.397395Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 4163365956343930020 with status (index: 5, slot: 938)
+2026-01-29T11:56:07.397406Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.397412Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 4163365956343930020 with status (index: 5, slot: 938)
+2026-01-29T11:56:07.398264Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.398304Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0) inputs
+2026-01-29T11:56:07.398313Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.398332Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.398979Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: QsC9Bo6DX8AaLzFLsB91YeN5qZZcAYXXU3pMQ69ixjW
+2026-01-29T11:56:07.399410Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/init_user_position.arcis
+2026-01-29T11:56:07.401674Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:07.401716Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:07.507249Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo QsC9Bo6DX8AaLzFLsB91YeN5qZZcAYXXU3pMQ69ixjW
+2026-01-29T11:56:07.507312Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo QsC9Bo6DX8AaLzFLsB91YeN5qZZcAYXXU3pMQ69ixjW
+2026-01-29T11:56:07.507335Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.507343Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.507356Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0))
+2026-01-29T11:56:07.507387Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0))
+2026-01-29T11:56:07.507381Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T11:56:07.507404Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:294: Reusing cached preprocessing bundler for base_id 147438283457911433340656051057242145556
+2026-01-29T11:56:07.520348Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:436: Processing Cerberus computation (283446107517538619513991377116131557187)
+2026-01-29T11:56:07.554290Z DEBUG arx::coordinator: arx/src/coordinator.rs:619: Coordinator received online unit output: ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.554324Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.554333Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [144, 194, 71, 175, 66, 213, 168, 197, 103, 214, 103, 73, 252, 195, 183, 38, 2, 244, 236, 1, 124, 102, 14, 152, 181, 172, 31, 232, 59, 139, 120, 186, 80, 23, 118, 111, 223, 185, 21, 199, 27, 186, 73, 215, 192, 50, 183, 34, 19, 42, 53, 248, 48, 7, 69, 42, 213, 242, 190, 171, 39, 206, 223, 215, 217, 245, 70, 160, 33, 70, 159, 191, 139, 172, 89, 30, 206, 117, 129, 80, 170, 3, 0, 0, 0, 0, 0, 0, 5, 0]
+2026-01-29T11:56:07.554328Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:140: Processing outputed computation
+2026-01-29T11:56:07.554611Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 4163365956343930020, our signature will be stored but not aggregated
+2026-01-29T11:56:07.554846Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.101:8002
+2026-01-29T11:56:07.554946Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.101:59976
+2026-01-29T11:56:07.555030Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 4163365956343930020
+2026-01-29T11:56:07.555044Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 4163365956343930020 (2/2)
+2026-01-29T11:56:07.555393Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 4163365956343930020
+2026-01-29T11:56:07.555407Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.555448Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T11:56:07.555469Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 283446107517538619513991377116131557187 (cluster_offset: 0)
+2026-01-29T11:56:07.564488Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:409: Transaction simulation consumed 118086 compute units
+2026-01-29T11:56:07.565369Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:236: Fee calculation: base_fee=5000, compute_units=118086, priority_fee=0, total_fee=5000, fee_variance_buffer=1000, concurrent_callback_buffer=50000
+2026-01-29T11:56:07.565594Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:376: Fresh balance range: fresh_balance=999999970000, min=999999914000, max=999999966000, total_fee=5000, staleness_reduction=true
+2026-01-29T11:56:07.793478Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:07.793671Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:07.796815Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T11:56:07.796836Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T11:56:07.796848Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:07.796856Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 4163365956343930020
+|-> prefetch    : +0ms
+|-> prefetched  : +110ms
+|-> execute     : +0ms
+|-> output      : +156ms
+|-> signed      : +1ms
+|-> executed    : +241ms
+
+2026-01-29T11:56:07.796884Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 4163365956343930020
+2026-01-29T11:56:07.796916Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.796927Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.796934Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:306: Computation executed and removed from cache: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:07.802154Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:07.802201Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:08.069266Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:784: Sent callback computation tx for mxe 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K with sig 4QYnUewSqmgimpgRfX58dnSVEtCs5UL6JCFibx4JxAqEFoLaXs2YuHChPYzDtoRQTNaUTq76LYbRQgMs7ypCEyY5
+2026-01-29T11:56:08.069338Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:08.069353Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T11:56:08.069364Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:08.069370Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:313: Computation info not found in cache: ArxComputationReference: 4163365956343930020
+2026-01-29T11:56:09.396489Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:09.396912Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:09.402155Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:09.402190Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:09.496445Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T11:56:09.496515Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [13617533240292900044]
+2026-01-29T11:56:09.496538Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:09.496564Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:09.496573Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 13617533240292900044 with status (index: 6, slot: 943)
+2026-01-29T11:56:09.496584Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:09.496590Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 13617533240292900044 with status (index: 6, slot: 943)
+2026-01-29T11:56:09.497676Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:09.497786Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:09.497857Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: 6D4MvtJRe6WvAvkE9VcGQ3u5Wwy7Q83an6uEFJmnXgV3
+2026-01-29T11:56:09.498551Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/deposit.arcis
+2026-01-29T11:56:09.499106Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0) inputs
+2026-01-29T11:56:09.499149Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:09.660303Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo 6D4MvtJRe6WvAvkE9VcGQ3u5Wwy7Q83an6uEFJmnXgV3
+2026-01-29T11:56:09.660366Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo 6D4MvtJRe6WvAvkE9VcGQ3u5Wwy7Q83an6uEFJmnXgV3
+2026-01-29T11:56:09.660394Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:09.660402Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:09.660416Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0))
+2026-01-29T11:56:09.660449Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0))
+2026-01-29T11:56:09.660442Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T11:56:09.660467Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:294: Reusing cached preprocessing bundler for base_id 147438283457911433340656051057242145556
+2026-01-29T11:56:09.819728Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:436: Processing Cerberus computation (114545961611083753347458033617194537070)
+2026-01-29T11:56:10.157060Z DEBUG arx::coordinator: arx/src/coordinator.rs:619: Coordinator received online unit output: ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:10.157152Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:10.157171Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [124, 206, 169, 88, 18, 184, 154, 118, 62, 240, 99, 120, 123, 20, 51, 244, 158, 88, 48, 247, 242, 238, 62, 40, 137, 59, 27, 159, 120, 178, 99, 96, 5, 149, 25, 126, 73, 84, 109, 221, 18, 59, 182, 162, 209, 138, 155, 80, 210, 233, 46, 148, 143, 74, 135, 227, 189, 104, 15, 97, 119, 149, 140, 91, 154, 171, 30, 224, 16, 175, 35, 48, 87, 102, 217, 175, 63, 95, 31, 57, 24, 88, 41, 55, 250, 212, 170, 219, 110, 170, 127, 207, 247, 159, 50, 31, 47, 127, 215, 127, 10, 138, 162, 64, 162, 70, 196, 137, 84, 209, 110, 127, 145, 194, 71, 175, 66, 213, 168, 197, 103, 214, 103, 73, 252, 195, 183, 38, 85, 249, 62, 77, 40, 67, 127, 95, 227, 83, 105, 63, 154, 7, 52, 226, 128, 211, 242, 254, 146, 185, 88, 145, 241, 124, 37, 158, 13, 104, 71, 83, 85, 92, 25, 177, 114, 204, 240, 44, 164, 3, 173, 96, 183, 0, 145, 0, 209, 70, 253, 59, 185, 163, 108, 90, 51, 103, 148, 79, 196, 36, 168, 29, 175, 3, 0, 0, 0, 0, 0, 0, 6, 0]
+2026-01-29T11:56:10.157233Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:140: Processing outputed computation
+2026-01-29T11:56:10.157676Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 13617533240292900044, our signature will be stored but not aggregated
+2026-01-29T11:56:10.157927Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.101:51908
+2026-01-29T11:56:10.158112Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.101:8002
+2026-01-29T11:56:10.158377Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 13617533240292900044
+2026-01-29T11:56:10.158395Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 13617533240292900044 (2/2)
+2026-01-29T11:56:10.158854Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 13617533240292900044
+2026-01-29T11:56:10.159040Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:10.159066Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T11:56:10.159106Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 114545961611083753347458033617194537070 (cluster_offset: 0)
+2026-01-29T11:56:10.164331Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:409: Transaction simulation consumed 147819 compute units
+2026-01-29T11:56:10.167588Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:236: Fee calculation: base_fee=5000, compute_units=147819, priority_fee=0, total_fee=5000, fee_variance_buffer=1000, concurrent_callback_buffer=50000
+2026-01-29T11:56:10.167917Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:376: Fresh balance range: fresh_balance=999999965000, min=999999909000, max=999999961000, total_fee=5000, staleness_reduction=true
+2026-01-29T11:56:10.201123Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:10.201229Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:10.202394Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:10.202433Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:10.296747Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T11:56:10.296806Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T11:56:10.296824Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:10.296836Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 13617533240292900044
+|-> prefetch    : +0ms
+|-> prefetched  : +163ms
+|-> execute     : +0ms
+|-> output      : +660ms
+|-> signed      : +1ms
+|-> executed    : +137ms
+
+2026-01-29T11:56:10.296859Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 13617533240292900044
+2026-01-29T11:56:10.296887Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.296899Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.296945Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:306: Computation executed and removed from cache: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.605672Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:10.606989Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:10.671630Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:792: Callback computation tx for mxe 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K already sent
+2026-01-29T11:56:10.671726Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.671743Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T11:56:10.671754Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.671761Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:313: Computation info not found in cache: ArxComputationReference: 13617533240292900044
+2026-01-29T11:56:10.696926Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T11:56:10.696993Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [3614141705077431112]
+2026-01-29T11:56:10.697018Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:10.697045Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:10.697054Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 3614141705077431112 with status (index: 7, slot: 946)
+2026-01-29T11:56:10.697069Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:10.697076Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 3614141705077431112 with status (index: 7, slot: 946)
+2026-01-29T11:56:10.698012Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.698046Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:10.698103Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: FyZ5JcU7dzjeoPKWrBCZzSa3eBgbNtAXgV12Y4uqMDnD
+2026-01-29T11:56:10.698477Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/reveal_pending_deposits.arcis
+2026-01-29T11:56:10.698619Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0) inputs
+2026-01-29T11:56:10.698643Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.701884Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:10.701920Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:10.794199Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo FyZ5JcU7dzjeoPKWrBCZzSa3eBgbNtAXgV12Y4uqMDnD
+2026-01-29T11:56:10.794278Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo FyZ5JcU7dzjeoPKWrBCZzSa3eBgbNtAXgV12Y4uqMDnD
+2026-01-29T11:56:10.794305Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:10.794315Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.794333Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0))
+2026-01-29T11:56:10.794367Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0))
+2026-01-29T11:56:10.794357Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T11:56:10.794383Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:294: Reusing cached preprocessing bundler for base_id 147438283457911433340656051057242145556
+2026-01-29T11:56:10.815816Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:436: Processing Cerberus computation (23025039936854354445428626803343392325)
+2026-01-29T11:56:10.851620Z DEBUG arx::coordinator: arx/src/coordinator.rs:619: Coordinator received online unit output: ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.851700Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.851712Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [0, 202, 154, 59, 0, 0, 0, 0, 178, 3, 0, 0, 0, 0, 0, 0, 7, 0]
+2026-01-29T11:56:10.851715Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:140: Processing outputed computation
+2026-01-29T11:56:10.852011Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 3614141705077431112, our signature will be stored but not aggregated
+2026-01-29T11:56:10.852255Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.101:8002
+2026-01-29T11:56:10.853408Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.101:51910
+2026-01-29T11:56:10.853535Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 3614141705077431112
+2026-01-29T11:56:10.853550Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 3614141705077431112 (2/2)
+2026-01-29T11:56:10.853812Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 3614141705077431112
+2026-01-29T11:56:10.853834Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.853891Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T11:56:10.853914Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 23025039936854354445428626803343392325 (cluster_offset: 0)
+2026-01-29T11:56:10.861842Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:409: Transaction simulation consumed 120176 compute units
+2026-01-29T11:56:10.862168Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:236: Fee calculation: base_fee=5000, compute_units=120176, priority_fee=0, total_fee=5000, fee_variance_buffer=1000, concurrent_callback_buffer=50000
+2026-01-29T11:56:10.862408Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:376: Fresh balance range: fresh_balance=999999960000, min=999999904000, max=999999956000, total_fee=5000, staleness_reduction=true
+2026-01-29T11:56:11.102434Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T11:56:11.102752Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T11:56:11.196736Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T11:56:11.196792Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T11:56:11.196804Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T11:56:11.196813Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 3614141705077431112
+|-> prefetch    : +0ms
+|-> prefetched  : +97ms
+|-> execute     : +0ms
+|-> output      : +154ms
+|-> signed      : +2ms
+|-> executed    : +342ms
+
+2026-01-29T11:56:11.196833Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 3614141705077431112
+2026-01-29T11:56:11.196852Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:11.196862Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:11.196868Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:306: Computation executed and removed from cache: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:11.202104Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T11:56:11.202152Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T11:56:11.365453Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:792: Callback computation tx for mxe 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K already sent
+2026-01-29T11:56:11.365543Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:11.365557Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T11:56:11.365570Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 3614141705077431112
+2026-01-29T11:56:11.365576Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:313: Computation info not found in cache: ArxComputationReference: 3614141705077431112

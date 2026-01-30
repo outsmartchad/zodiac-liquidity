@@ -1,0 +1,57 @@
+2026-01-29T09:42:54.542449Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 1/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T09:42:56.544445Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 2/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T09:43:00.546410Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 3/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T09:43:08.600110Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=0
+2026-01-29T09:43:08.690389Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-29T09:43:08.699874Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T09:43:08.700658Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-29T09:43:08.700676Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-29T09:43:08.700751Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-29T09:43:08.701237Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-29T09:43:08.701284Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-29T09:43:08.701342Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-29T09:43:08.701373Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-29T09:43:08.701406Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-29T09:43:08.701527Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-29T09:43:08.701651Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-29T09:43:08.700457Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-29T09:43:08.701747Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-29T09:43:08.701984Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-29T09:43:08.702238Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T09:43:08.702242Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T09:43:08.702262Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T09:43:08.702270Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T09:43:08.701657Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-29T09:43:08.703630Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-29T09:43:08.705086Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:43:08.706328Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:43:08.706768Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:43:08.706924Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T09:43:08.710101Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:43:08.710208Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T09:43:08.710222Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T09:43:09.231942Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-29T09:43:09.231996Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-29T09:43:09.232044Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [729066887121812181]
+2026-01-29T09:43:09.232085Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:43:09.232085Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T09:43:09.232121Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 729066887121812181 with status (index: 0, slot: 216)
+2026-01-29T09:43:09.232145Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:43:09.232154Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 729066887121812181 with status (index: 0, slot: 216)
+2026-01-29T09:43:09.232796Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:43:09.232858Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0) inputs
+2026-01-29T09:43:09.232872Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:43:09.233344Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:43:09.233439Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:43:09.233944Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:411: Fetching local circuit data from: /usr/arx-node/circuits/mxe_keygen/circuit.arcis
+2026-01-29T09:43:09.575711Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:43:09.575758Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:43:09.575779Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:43:09.575788Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:43:09.575808Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))
+2026-01-29T09:43:09.575819Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T09:43:09.578988Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))
+2026-01-29T09:43:09.579026Z  WARN arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:210: Running MXE keygen computation but key material already exist for MXE FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))

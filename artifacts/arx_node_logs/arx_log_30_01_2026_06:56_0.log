@@ -1,0 +1,57 @@
+2026-01-30T06:56:45.406196Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=0
+2026-01-30T06:56:45.548892Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-30T06:56:45.549469Z ERROR arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:115: Failed to load MXE key material: Other("Failed to read directory /usr/arx-node/private-shares: No such file or directory (os error 2)")
+2026-01-30T06:56:45.549569Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-30T06:56:45.549587Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-30T06:56:45.549564Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-30T06:56:45.549588Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-30T06:56:45.549640Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-30T06:56:45.549668Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-30T06:56:45.549734Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-30T06:56:45.549752Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-30T06:56:45.549785Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-30T06:56:45.549719Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-30T06:56:45.552652Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-30T06:56:45.549675Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-30T06:56:45.552854Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-30T06:56:45.552871Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-30T06:56:45.552875Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-30T06:56:45.552956Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-30T06:56:45.553000Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-30T06:56:45.549666Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-30T06:56:45.562856Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-30T06:56:45.565333Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-30T06:56:45.565376Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-30T06:56:45.568133Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-30T06:56:45.568199Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-30T06:56:45.568243Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-30T06:56:45.568311Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-30T06:56:45.568336Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-30T06:56:46.073650Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-30T06:56:46.073738Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-30T06:56:46.073784Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [10719944527008109894]
+2026-01-30T06:56:46.073840Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 10719944527008109894
+2026-01-30T06:56:46.073856Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-30T06:56:46.073871Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 10719944527008109894 with status (index: 0, slot: 215)
+2026-01-30T06:56:46.073881Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 10719944527008109894
+2026-01-30T06:56:46.073888Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 10719944527008109894 with status (index: 0, slot: 215)
+2026-01-30T06:56:46.074542Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0)
+2026-01-30T06:56:46.074582Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0) inputs
+2026-01-30T06:56:46.074594Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 10719944527008109894
+2026-01-30T06:56:46.074623Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0)
+2026-01-30T06:56:46.074712Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: BdJyB18QqCDSWznFzQHf3Ks4aUdef3qiZDKqtHEW7xq
+2026-01-30T06:56:46.075177Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:411: Fetching local circuit data from: /usr/arx-node/circuits/mxe_keygen/circuit.arcis
+2026-01-30T06:56:46.444784Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo BdJyB18QqCDSWznFzQHf3Ks4aUdef3qiZDKqtHEW7xq
+2026-01-30T06:56:46.444859Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo BdJyB18QqCDSWznFzQHf3Ks4aUdef3qiZDKqtHEW7xq
+2026-01-30T06:56:46.444888Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 10719944527008109894
+2026-01-30T06:56:46.444896Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0)
+2026-01-30T06:56:46.444910Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0))
+2026-01-30T06:56:46.445181Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-30T06:56:46.447784Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 261544626942090780171791833011317326258 (cluster_offset: 0))
+2026-01-30T06:56:47.364839Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.101:42884
+2026-01-30T06:56:47.364970Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 10719944527008109894
+2026-01-30T06:56:47.364984Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 10719944527008109894 (1/2)
+2026-01-30T06:56:47.364991Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:233: Not ready to aggregate signatures for computation_offset 10719944527008109894, received signature will be stored but not aggregated
+2026-01-30T06:56:47.364997Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 10719944527008109894
+2026-01-30T06:56:48.543913Z DEBUG arx::units::online_phase_unit::preprocessing_bundler: arx/src/units/online_phase_unit/preprocessing_bundler.rs:104: TD registration connection attempt 1 failed with error Os { code: 111, kind: ConnectionRefused, message: "Connection refused" }, retrying in 100ms
+2026-01-30T06:56:48.645053Z DEBUG arx::units::online_phase_unit::preprocessing_bundler: arx/src/units/online_phase_unit/preprocessing_bundler.rs:46: Protocol 6715196187486229595349012400460666172 registered successfully

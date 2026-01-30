@@ -1,0 +1,13 @@
+2026-01-29T16:30:42.521184Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 1/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T16:30:44.523069Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 2/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T16:30:48.524466Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 3/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T16:30:56.526520Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 4/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T16:31:12.528868Z  WARN arx::utils: arx/src/utils.rs:199: Attempt 5/5: error while calling client.get_version().map_err(|e|
+ArxError::Solana(format!("Failed to check cluster status: {}", e))): Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T16:31:12.528947Z ERROR arx: arx/src/main.rs:58: PANIC DETECTED: panicked at arx/src/main.rs:71:10:
+Solana cluster is not up and running: Solana("Attempt 5/5: Solana network error: Failed to check cluster status: error sending request for url (http://host.docker.internal:8899/)")
+2026-01-29T16:31:12.528957Z ERROR arx: arx/src/main.rs:60: PANIC LOCATION: arx/src/main.rs:71:10

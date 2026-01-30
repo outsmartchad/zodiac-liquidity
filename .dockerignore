@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+target/
+
+# Build artifacts
+.anchor/
+dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Local config
+.env
+.env.local
+
+# Test artifacts
+test-ledger/

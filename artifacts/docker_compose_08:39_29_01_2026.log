@@ -1,0 +1,100 @@
+[stderr]  arx-node-1 Pulling 
+[stderr]  arcium-trusted-dealer Pulling 
+[stderr]  arx-node-0 Pulling 
+[stderr]  fa9009bc1613 Pulling fs layer 
+[stderr]  b1daf582db6a Pulling fs layer 
+[stderr]  2c5f79694a02 Pulling fs layer 
+[stderr]  0560feab2278 Pulling fs layer 
+[stderr]  1f2f98e415c5 Pulling fs layer 
+[stderr]  470e424e51a3 Pulling fs layer 
+[stderr]  d7463a0a1a29 Pulling fs layer 
+[stderr]  7dada7043703 Pulling fs layer 
+[stderr]  4f4fb700ef54 Pulling fs layer 
+[stderr]  577ef3df4109 Pulling fs layer 
+[stderr]  39fa86524356 Pulling fs layer 
+[stderr]  40ab340a898c Pulling fs layer 
+[stderr]  31cd4e37ec99 Pulling fs layer 
+[stderr]  0fa6ddf0e34b Pulling fs layer 
+[stderr]  4f4fb700ef54 Download complete 
+[stderr]  fa9009bc1613 Download complete 
+[stderr]  0560feab2278 Downloading  1.049MB/12.74MB
+[stderr]  fa9009bc1613 Extracting 1 s
+[stderr]  577ef3df4109 Download complete 
+[stderr]  0560feab2278 Download complete 
+[stderr]  2c5f79694a02 Download complete 
+[stderr]  fa9009bc1613 Extracting 1 s
+[stderr]  31cd4e37ec99 Download complete 
+[stderr]  39fa86524356 Downloading  5.243MB/6.757MB
+[stderr]  0fa6ddf0e34b Download complete 
+[stderr]  7dada7043703 Downloading  6.291MB/53.72MB
+[stderr]  b1daf582db6a Downloading  9.437MB/12.74MB
+[stderr]  470e424e51a3 Download complete 
+[stderr]  fa9009bc1613 Extracting 1 s
+[stderr]  39fa86524356 Download complete 
+[stderr]  40ab340a898c Download complete 
+[stderr]  1f2f98e415c5 Download complete 
+[stderr]  d7463a0a1a29 Download complete 
+[stderr]  7dada7043703 Downloading  19.92MB/53.72MB
+[stderr]  b1daf582db6a Download complete 
+[stderr]  40ab340a898c Extracting 1 s
+[stderr]  fa9009bc1613 Extracting 1 s
+[stderr]  577ef3df4109 Extracting 1 s
+[stderr]  31cd4e37ec99 Pull complete 
+[stderr]  7dada7043703 Downloading   36.7MB/53.72MB
+[stderr]  cb0012c83aea Download complete 
+[stderr]  fa9009bc1613 Pull complete 
+[stderr]  40ab340a898c Pull complete 
+[stderr]  2c5f79694a02 Pull complete 
+[stderr]  b1daf582db6a Extracting 1 s
+[stderr]  a505165a57ca Download complete 
+[stderr]  577ef3df4109 Extracting 1 s
+[stderr]  7dada7043703 Downloading  53.72MB/53.72MB
+[stderr]  b1daf582db6a Extracting 1 s
+[stderr]  577ef3df4109 Pull complete 
+[stderr]  39fa86524356 Extracting 1 s
+[stderr]  7dada7043703 Download complete 
+[stderr]  0560feab2278 Extracting 1 s
+[stderr]  b1daf582db6a Pull complete 
+[stderr]  4f4fb700ef54 Pull complete 
+[stderr]  0fa6ddf0e34b Pull complete 
+[stderr]  39fa86524356 Pull complete 
+[stderr]  arcium-trusted-dealer Pulled 
+[stderr]  0560feab2278 Extracting 1 s
+[stderr]  0560feab2278 Pull complete 
+[stderr]  1f2f98e415c5 Pull complete 
+[stderr]  d7463a0a1a29 Pull complete 
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  7dada7043703 Extracting 1 s
+[stderr]  470e424e51a3 Extracting 1 s
+[stderr]  7dada7043703 Pull complete 
+[stderr]  470e424e51a3 Pull complete 
+[stderr]  arx-node-0 Pulled 
+[stderr]  arx-node-1 Pulled 
+[stderr]  Network artifacts_arx_network  Creating
+[stderr]  Network artifacts_arx_network  Created
+[stderr]  Container artifacts-arx-node-1-1  Creating
+[stderr]  Container artifacts-arx-node-0-1  Creating
+[stderr]  Container artifacts-arcium-trusted-dealer-1  Creating
+[stderr]  Container artifacts-arcium-trusted-dealer-1  Created
+[stderr]  Container artifacts-arx-node-0-1  Created
+[stderr]  Container artifacts-arx-node-1-1  Created
+[stdout] Attaching to arcium-trusted-dealer-1, arx-node-0-1, arx-node-1-1
+[stdout] [Karx-node-0-1 exited with code 0
+[stdout] [Karx-node-1-1 exited with code 0
+[stdout] [Karx-node-0-1 exited with code 0
+[stdout] [Karx-node-1-1 exited with code 0
+[stdout] [Karx-node-0-1 exited with code 0
+[stdout] [Karx-node-1-1 exited with code 0
+[stdout] [Karx-node-1-1 exited with code 0
+[stdout] [Karx-node-0-1 exited with code 0
+[stdout] [Karx-node-1-1 exited with code 0
+[stdout] [Karx-node-0-1 exited with code 0
+[stdout] [Karx-node-0-1 exited with code 137
+[stdout] [Karcium-trusted-dealer-1 exited with code 137
+[stdout] [Karx-node-1-1 exited with code 137

@@ -1,0 +1,9 @@
+[package]
+name = "encrypted-ixs"
+version = "0.1.0"
+description = "Arcis encrypted instructions for Zodiac Liquidity MPC computations"
+edition = "2021"
+
+[dependencies]
+arcis = "=0.6.3"
+blake3 = "=1.8.2"

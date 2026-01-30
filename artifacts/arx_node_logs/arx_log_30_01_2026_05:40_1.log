@@ -1,0 +1,33 @@
+2026-01-30T05:40:29.774496Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=1
+2026-01-30T05:40:29.840500Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-30T05:40:29.843186Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: 32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K
+2026-01-30T05:40:29.843267Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-30T05:40:29.843281Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-30T05:40:29.843280Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-30T05:40:29.843353Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-30T05:40:29.843591Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-30T05:40:29.843613Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-30T05:40:29.844793Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-30T05:40:29.843294Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-30T05:40:29.845379Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-30T05:40:29.843369Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-30T05:40:29.845190Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-30T05:40:29.845094Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-30T05:40:29.845542Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-30T05:40:29.846044Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-30T05:40:29.845596Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-30T05:40:29.843618Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-30T05:40:29.846076Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-30T05:40:29.846090Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-30T05:40:29.843596Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-30T05:40:29.912703Z DEBUG arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:136: Node is already active, skipping activation
+2026-01-30T05:40:29.912767Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-30T05:40:29.912795Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-30T05:40:29.914078Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-30T05:40:29.916006Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-30T05:40:29.916198Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-30T05:40:29.916302Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-30T05:40:29.916319Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:132: Execpool contains the same computations, skipping update
+2026-01-30T05:40:29.917043Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-30T05:40:29.917121Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-30T05:40:29.917173Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update

@@ -1,0 +1,47 @@
+2026-01-29T10:32:38.610667Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=0
+2026-01-29T10:32:38.682347Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-29T10:32:38.691895Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T10:32:38.692038Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-29T10:32:38.692555Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-29T10:32:38.692593Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-29T10:32:38.692681Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-29T10:32:38.692938Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-29T10:32:38.692957Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-29T10:32:38.692953Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-29T10:32:38.693027Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-29T10:32:38.693113Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-29T10:32:38.693210Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-29T10:32:38.693317Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-29T10:32:38.703014Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-29T10:32:38.703058Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T10:32:38.703075Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T10:32:38.706144Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-29T10:32:38.706885Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-29T10:32:38.703198Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-29T10:32:38.707604Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T10:32:38.707613Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T10:32:38.709248Z DEBUG arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:136: Node is already active, skipping activation
+2026-01-29T10:32:38.709273Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-29T10:32:38.709286Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-29T10:32:38.722708Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T10:32:38.723588Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T10:32:38.723819Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T10:32:38.724098Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T10:32:38.724119Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T10:32:38.724471Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T10:32:38.724550Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T10:32:38.724578Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:132: Execpool contains the same computations, skipping update
+2026-01-29T10:46:29.657408Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:46:29.660712Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:46:29.666243Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:46:29.666520Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:46:29.678790Z  WARN arx::program: arx/src/program.rs:372: Attempt 1/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:46:29.680216Z  WARN arx::program: arx/src/program.rs:372: Attempt 1/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server

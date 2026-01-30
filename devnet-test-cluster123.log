@@ -1,0 +1,125 @@
+Syncing program keys... (use --skip-keys-sync to skip)
+Clean completed successfully!
+Syncing program ids for the configured cluster (localnet)
+
+All program id declarations are synced.
+Checking if encrypted instructions are up to date.
+Encrypted instructions are up to date. Skipping build.
+Error: Function _ZN109_$LT$arcium_client..idl..arcium..utils..Account$u20$as$u20$core..convert..TryFrom$LT$$RF$$u5b$u8$u5d$$GT$$GT$8try_from17ha037aaf1519dcf38E Stack offset of 721512 exceeded max offset of 4096 by 717416 bytes, please minimize large stack variables. Estimated function frame size: 721536 bytes. Exceeding the maximum stack offset may cause undefined behavior during execution.
+
+warning: constant `COMP_DEF_OFFSET_CLEAR_POSITION` is never used
+  --> programs/zodiac_liquidity/src/lib.rs:39:7
+   |
+39 | const COMP_DEF_OFFSET_CLEAR_POSITION: u32 = comp_def_offset("clear_position");
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` on by default
+
+warning: `zodiac_liquidity` (lib) generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1.43s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running unittests src/lib.rs (/app/target/debug/deps/zodiac_liquidity-dfd1186b3ff6587a)
+Running tests against devnet cluster (offset: 123)
+Starting anchor test against devnet cluster...
+
+Found a 'test' script in the Anchor.toml. Running it as a test suite!
+
+Running test suite: "/app/Anchor.toml"
+
+yarn run v1.22.22
+$ /app/node_modules/.bin/ts-mocha -p ./tsconfig.json -t 1000000 'tests/**/*.ts'
+
+
+  zodiac-liquidity
+============================================================
+Zodiac Liquidity Tests - Setup
+============================================================
+Program ID: FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+Owner: 5P9MWSyYFnJc9sxsBePXbgXUHuxjuE3T9wsUUYbmuP4R
+MXE x25519 pubkey: 1f4adbb53e2cd088c3a2bb835eda299b242c609093aae0ce3731f3eeeee68b62
+Encryption cipher initialized
+Creating test token mint...
+Token mint: 7TFxmmFdYrsHiVNd4gBvb8WHxSV772MGEBq6ib5s8ges
+Vault PDA: HH1feU8QbK9r6YwZYb5Sv2qgyqDJvBzzkW4hTAEH5Xgx
+User Position PDA: HyFY9Par22NcT9grdwhvcqcKYzEFWyuEEJ8AdkH6trgB
+    Computation Definition Initialization
+init_vault comp def PDA: EJX8W6xXyJVW3Cgs2C3mZabYaLqKkfW1FVMZeJvjyezp
+init_vault comp def already exists (141 bytes), skipping
+Init vault comp def tx: skipped
+      ✔ initializes init_vault computation definition (252ms)
+init_user_position comp def PDA: AtDdpxywFm79JA9eQ91ZqKamqVuz1n6xDJFJyNEEfKme
+init_user_position comp def already exists (140 bytes), skipping
+Init user position comp def tx: skipped
+      ✔ initializes init_user_position computation definition (220ms)
+deposit comp def PDA: 8SHqgCFcFEP8nuHtFsvMieS98sNRNr3qPUDpJLXjL4Xu
+deposit comp def already exists (153 bytes), skipping
+Init deposit comp def tx: skipped
+      ✔ initializes deposit computation definition (313ms)
+reveal_pending_deposits comp def PDA: FBv7CfhRZNc88Apht6Wbk13wkCd6oHy6pptjq89bsGuM
+reveal_pending_deposits comp def already exists (141 bytes), skipping
+Init reveal pending comp def tx: skipped
+      ✔ initializes reveal_pending_deposits computation definition (214ms)
+record_lp_tokens comp def PDA: ENBEG9vzNebBoFsP5gcDP8r8v34dAkPwgL5eRHjFZseJ
+record_lp_tokens comp def already exists (145 bytes), skipping
+Init record LP comp def tx: skipped
+      ✔ initializes record_lp_tokens computation definition (213ms)
+compute_withdrawal comp def PDA: 7BPHyvom64mXLLGFb8vC3Cn6YvjkwYB2n6oUpP21HdZk
+compute_withdrawal comp def already exists (144 bytes), skipping
+Init withdraw comp def tx: skipped
+      ✔ initializes compute_withdrawal computation definition (212ms)
+get_user_position comp def PDA: 2ZPcL5aKHW7eRjmNjvbNLRNtMpCkGcgLfg5Gpz4YfTBk
+get_user_position comp def already exists (145 bytes), skipping
+Init get position comp def tx: skipped
+      ✔ initializes get_user_position computation definition (215ms)
+    Vault Creation
+      1) creates a new vault
+    User Position Creation
+      2) creates a user position
+    Deposit Flow
+      3) deposits tokens with encrypted amount
+    Reveal Pending Deposits
+      4) reveals aggregate pending deposits
+
+
+  7 passing (11s)
+  4 failing
+
+  1) zodiac-liquidity
+       Vault Creation
+         creates a new vault:
+     Error: AnchorError caused by account: mempool_account. Error Code: ConstraintAddress. Error Number: 2012. Error Message: An address constraint was violated.
+Program log: Left:
+Program log: FL19KBbU458WSM93BtCw5fGZBY5pHs8MytEUAd5Wdq64
+Program log: Right:
+Program log: Ex7BD8o8PK1y2eXDd38Jgujj93uHygrZeWXDeGAHmHtN
+      at Function.parse (node_modules/@coral-xyz/anchor/src/error.ts:168:14)
+      at translateError (node_modules/@coral-xyz/anchor/src/error.ts:277:35)
+      at MethodsBuilder.rpc [as _rpcFn] (node_modules/@coral-xyz/anchor/src/program/namespace/rpc.ts:35:29)
+      at processTicksAndRejections (node:internal/process/task_queues:95:5)
+
+  2) zodiac-liquidity
+       User Position Creation
+         creates a user position:
+     Error: Unknown action 'undefined'
+      at AnchorProvider.sendAndConfirm (node_modules/@coral-xyz/anchor/src/provider.ts:190:31)
+      at processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at MethodsBuilder.rpc [as _rpcFn] (node_modules/@coral-xyz/anchor/src/program/namespace/rpc.ts:29:16)
+
+  3) zodiac-liquidity
+       Deposit Flow
+         deposits tokens with encrypted amount:
+     Error: Unknown action 'undefined'
+      at AnchorProvider.sendAndConfirm (node_modules/@coral-xyz/anchor/src/provider.ts:190:31)
+      at processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at MethodsBuilder.rpc [as _rpcFn] (node_modules/@coral-xyz/anchor/src/program/namespace/rpc.ts:29:16)
+
+  4) zodiac-liquidity
+       Reveal Pending Deposits
+         reveals aggregate pending deposits:
+     Error: Unknown action 'undefined'
+      at AnchorProvider.sendAndConfirm (node_modules/@coral-xyz/anchor/src/provider.ts:190:31)
+      at processTicksAndRejections (node:internal/process/task_queues:95:5)
+      at MethodsBuilder.rpc [as _rpcFn] (node_modules/@coral-xyz/anchor/src/program/namespace/rpc.ts:29:16)
+
+
+

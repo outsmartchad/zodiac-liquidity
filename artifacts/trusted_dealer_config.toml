@@ -1,0 +1,10 @@
+[dealer]
+cluster_offsets = [0]
+local_ip = "172.20.0.99"
+master_seed_path = "/usr/trusted-dealer/master_seed.json"
+n_peers = 2
+private_key_path = "/usr/trusted-dealer/identity.json"
+rate_limit_initial_tokens = 10000000
+rate_limit_max_tokens = 10000000
+rate_limit_tokens_per_second = 100000
+solana_rpc_url = "http://host.docker.internal:8899"

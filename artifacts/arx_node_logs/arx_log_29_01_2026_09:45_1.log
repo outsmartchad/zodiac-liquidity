@@ -1,0 +1,319 @@
+2026-01-29T09:45:38.990144Z  INFO arx::metrics: arx/src/metrics.rs:524: Node metrics initialized: version=0.6.5, cluster=0, node=1
+2026-01-29T09:45:39.075214Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:165: Loading key material from path /usr/arx-node/private-shares and /usr/arx-node/public-inputs
+2026-01-29T09:45:39.081464Z DEBUG arx::units::online_phase_unit::key_material: arx/src/units/online_phase_unit/key_material.rs:179: Loaded key material for MXE: FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T09:45:39.081726Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:91: Cache unit started
+2026-01-29T09:45:39.082028Z  INFO arx: arx/src/main.rs:122: Starting metrics server
+2026-01-29T09:45:39.082107Z  INFO arx: arx/src/main.rs:127: Starting ARX coordinator
+2026-01-29T09:45:39.082063Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:141: Circuit unit started
+2026-01-29T09:45:39.082869Z  INFO arx::metrics: arx/src/metrics.rs:312: Metrics server listening on http://0.0.0.0:9091/metrics
+2026-01-29T09:45:39.082930Z  INFO arx::coordinator: arx/src/coordinator.rs:225: Coordinator started
+2026-01-29T09:45:39.084814Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:124: Computation transaction unit started
+2026-01-29T09:45:39.085893Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:99: Inputs unit started
+2026-01-29T09:45:39.082988Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:65: Node transaction unit started
+2026-01-29T09:45:39.086762Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:67: Activating node
+2026-01-29T09:45:39.086010Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:139: Online phase unit started
+2026-01-29T09:45:39.082313Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:78: BLS unit started
+2026-01-29T09:45:39.087614Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:65: Execpool unit started
+2026-01-29T09:45:39.087721Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T09:45:39.087732Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T09:45:39.087948Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:63: Mempool unit started
+2026-01-29T09:45:39.088103Z  INFO arx::program: arx/src/program.rs:227: Pub/sub client started
+2026-01-29T09:45:39.088112Z  INFO arx::program: arx/src/program.rs:229: Connecting initial pub/sub
+2026-01-29T09:45:39.085978Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:112: State unit started
+2026-01-29T09:45:39.089517Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:45:39.106780Z  INFO arx::program: arx/src/program.rs:269: Fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:45:39.109063Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:45:39.109275Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T09:45:39.109411Z  INFO arx::program: arx/src/program.rs:283: Subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:45:39.109525Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T09:45:39.109544Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T09:45:39.614957Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:70: Node activated
+2026-01-29T09:45:39.615002Z  INFO arx::coordinator: arx/src/coordinator.rs:257: Node activated, coordinator running
+2026-01-29T09:45:39.615035Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [729066887121812181]
+2026-01-29T09:45:39.615082Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:39.615109Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T09:45:39.615129Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 729066887121812181 with status (index: 0, slot: 202)
+2026-01-29T09:45:39.615140Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:39.615148Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 729066887121812181 with status (index: 0, slot: 202)
+2026-01-29T09:45:39.615603Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:39.615659Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0) inputs
+2026-01-29T09:45:39.615668Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:39.615717Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:39.615790Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:45:39.616248Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:411: Fetching local circuit data from: /usr/arx-node/circuits/mxe_keygen/circuit.arcis
+2026-01-29T09:45:39.838026Z DEBUG arx::coordinator: arx/src/coordinator.rs:380: Coordinator received circuit info: CircuitInfo 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:45:39.838084Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:195: Processing fetched circuit: CircuitInfo 42VrBPnZ38hJX86a3fKHynkqyGgMKtjnr8UdFToYGXgS
+2026-01-29T09:45:39.838120Z DEBUG arx::coordinator: arx/src/coordinator.rs:322: Coordinator received cache unit prefetched computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:39.838134Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:323: Processing prefetched computation
+2026-01-29T09:45:39.838152Z DEBUG arx::coordinator: arx/src/coordinator.rs:332: Coordinator received cache unit execute computation: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:39.838166Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:183: Connecting to peers (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))
+2026-01-29T09:45:39.846862Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:202: Connected to peers (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))
+2026-01-29T09:45:39.846900Z  WARN arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:210: Running MXE keygen computation but key material already exist for MXE FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL (ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0))
+2026-01-29T09:45:39.851260Z DEBUG arx::units::online_phase_unit::preprocessing_bundler: arx/src/units/online_phase_unit/preprocessing_bundler.rs:46: Protocol 248016683086310656528149261543419493072 registered successfully
+2026-01-29T09:45:39.852228Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:343: Created new preprocessing bundler for base_id 248016683086310656528149261543419493072, cache size: 1
+2026-01-29T09:45:40.439941Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:436: Processing Cerberus computation (124145311068161743775826452637807394875)
+2026-01-29T09:45:41.818871Z DEBUG arx::coordinator: arx/src/coordinator.rs:619: Coordinator received online unit output: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:41.818929Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:159: Setting MXE key material for FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T09:45:41.818933Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:41.818966Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:140: Processing outputed computation
+2026-01-29T09:45:41.818961Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [29, 9, 251, 207, 211, 129, 49, 99, 118, 50, 201, 215, 185, 254, 76, 252, 74, 235, 161, 238, 139, 133, 43, 200, 77, 9, 118, 206, 129, 109, 182, 16, 18, 255, 71, 86, 3, 12, 83, 254, 147, 227, 204, 58, 138, 224, 99, 252, 211, 44, 225, 249, 239, 247, 4, 232, 46, 63, 98, 106, 33, 9, 181, 248, 96, 252, 252, 216, 134, 2, 100, 0, 238, 231, 18, 36, 231, 71, 61, 152, 55, 10, 133, 157, 3, 62, 192, 238, 3, 44, 227, 56, 6, 176, 204, 7, 98, 246, 225, 230, 83, 129, 240, 103, 144, 22, 233, 33, 241, 227, 163, 78, 11, 27, 217, 189, 37, 96, 96, 48, 184, 173, 56, 35, 39, 97, 112, 29, 107, 112, 87, 20, 67, 154, 15, 79, 250, 175, 213, 171, 92, 183, 223, 145, 98, 50, 190, 230, 78, 167, 140, 255, 100, 101, 157, 14, 166, 90, 99, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+2026-01-29T09:45:41.819028Z  WARN arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:161: Existing MXE key material for FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL were overwritten
+2026-01-29T09:45:41.819323Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 729066887121812181, our signature will be stored but not aggregated
+2026-01-29T09:45:41.819510Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.100:8002
+2026-01-29T09:45:41.822972Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.100:36088
+2026-01-29T09:45:41.823057Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 729066887121812181
+2026-01-29T09:45:41.823069Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 729066887121812181 (2/2)
+2026-01-29T09:45:41.823312Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 729066887121812181
+2026-01-29T09:45:41.823330Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:41.823362Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 124145311068161743775826452637807394875 (cluster_offset: 0)
+2026-01-29T09:45:41.823360Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T09:45:41.824285Z DEBUG arx::units::computation_transaction_unit::keygen: arx/src/units/computation_transaction_unit/keygen.rs:86: ElGamal pubkey validity proof verification passed
+2026-01-29T09:45:42.327710Z DEBUG arx::units::computation_transaction_unit::keygen: arx/src/units/computation_transaction_unit/keygen.rs:119: Sent set_mxe_keys tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL with sig 5JpfAZUanQZvAKW7VJhbyzTzNZxF8DYHmbsw5itJMfqipwigBkdCXSWXLwYWq7jfL2a9agc3igw3UYG5Qryjd9Na
+2026-01-29T09:45:42.524664Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:45:42.524940Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:45:42.590116Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T09:45:42.590157Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T09:45:42.590169Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T09:45:42.590178Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 729066887121812181
+|-> prefetch    : +0ms
+|-> prefetched  : +223ms
+|-> execute     : +0ms
+|-> output      : +2203ms
+|-> signed      : +4ms
+|-> executed    : +766ms
+
+2026-01-29T09:45:42.590273Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 729066887121812181
+2026-01-29T09:45:42.590298Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:42.590308Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:42.590314Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:306: Computation executed and removed from cache: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:42.591534Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T09:45:42.591559Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T09:45:42.832321Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:784: Sent callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL with sig 5FqcQVrSTf6Y1eAnZX2fwsYRXTDpZ7NPfZnZHGFGbW714hiPv3gSn1Vb8mzSMEm9RUgM7uVVkfeGHyw1HCzbGvk3
+2026-01-29T09:45:42.832447Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:42.832462Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T09:45:42.832474Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:42.832480Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:313: Computation info not found in cache: ArxComputationReference: 729066887121812181
+2026-01-29T09:45:45.772541Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:45:45.772709Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:45:45.789863Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T09:45:45.789920Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [7101387144819530793]
+2026-01-29T09:45:45.789952Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:45:45.789989Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T09:45:45.790029Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 7101387144819530793 with status (index: 0, slot: 218)
+2026-01-29T09:45:45.790048Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:45:45.790059Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 7101387144819530793 with status (index: 0, slot: 218)
+2026-01-29T09:45:45.790678Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T09:45:45.790723Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T09:45:45.790733Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:45.790801Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0) inputs
+2026-01-29T09:45:45.790814Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:45:45.790869Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:45.790920Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: EJX8W6xXyJVW3Cgs2C3mZabYaLqKkfW1FVMZeJvjyezp
+2026-01-29T09:45:45.791597Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://files.catbox.moe/aetojl.arcis
+2026-01-29T09:45:46.358150Z ERROR arx::units::circuit_unit: arx/src/units/circuit_unit.rs:169: Failed to process computation definition EJX8W6xXyJVW3Cgs2C3mZabYaLqKkfW1FVMZeJvjyezp: Off-chain circuit fetch failed for source https://files.catbox.moe/aetojl.arcis: error sending request for url (https://files.catbox.moe/aetojl.arcis): connection closed before message completed
+2026-01-29T09:45:46.358207Z DEBUG arx::coordinator: arx/src/coordinator.rs:390: Coordinator received circuit unit error for computation definition EJX8W6xXyJVW3Cgs2C3mZabYaLqKkfW1FVMZeJvjyezp (Off-chain circuit fetch failed for source https://files.catbox.moe/aetojl.arcis: error sending request for url (https://files.catbox.moe/aetojl.arcis): connection closed before message completed)
+2026-01-29T09:45:46.358231Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:234: Processing failed circuit fetch: EJX8W6xXyJVW3Cgs2C3mZabYaLqKkfW1FVMZeJvjyezp
+2026-01-29T09:45:46.358245Z DEBUG arx::coordinator: arx/src/coordinator.rs:342: Coordinator received cache unit circuit error for computation: ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:46.358257Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:96: BLS unit received signature request: ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:46.358265Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:163: Message to sign length: [218, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+2026-01-29T09:45:46.358553Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:196: Not ready to aggregate signatures for computation_offset 7101387144819530793, our signature will be stored but not aggregated
+2026-01-29T09:45:46.358607Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:111: BLS unit accepted connection from 172.20.0.100:36100
+2026-01-29T09:45:46.358789Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:126: BLS unit received incoming signature for 7101387144819530793
+2026-01-29T09:45:46.358818Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:223: Stored signature for computation_offset 7101387144819530793 (2/2)
+2026-01-29T09:45:46.358830Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:313: Pushed signature to peer 172.20.0.100:8002
+2026-01-29T09:45:46.359086Z DEBUG arx::units::bls_unit: arx/src/units/bls_unit.rs:130: BLS unit processed incoming signature for 7101387144819530793
+2026-01-29T09:45:46.359102Z DEBUG arx::coordinator: arx/src/coordinator.rs:281: Coordinator received bls unit output: ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:46.359141Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:148: Processing signed computation
+2026-01-29T09:45:46.359167Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:429: Processing callback for computation ArxComputation 161359034584578515534375203259392006290 (cluster_offset: 0)
+2026-01-29T09:45:46.365676Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:409: Transaction simulation consumed 59829 compute units
+2026-01-29T09:45:46.366140Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:236: Fee calculation: base_fee=5000, compute_units=59829, priority_fee=0, total_fee=5000, fee_variance_buffer=1000, concurrent_callback_buffer=50000
+2026-01-29T09:45:46.366376Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:376: Fresh balance range: fresh_balance=999999995000, min=999999939000, max=999999991000, total_fee=5000, staleness_reduction=true
+2026-01-29T09:45:46.870501Z ERROR arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:803: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:45:46.870549Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:488: Attempt 1/5: error while calling post_callback_onchain(rpc, &tx, mxe): Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:45:48.873614Z ERROR arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:803: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:45:48.873718Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:488: Attempt 2/5: error while calling post_callback_onchain(rpc, &tx, mxe): Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:45:52.875586Z ERROR arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:803: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:45:52.875649Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:488: Attempt 3/5: error while calling post_callback_onchain(rpc, &tx, mxe): Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:46:00.878188Z ERROR arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:803: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:46:00.878254Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:488: Attempt 4/5: error while calling post_callback_onchain(rpc, &tx, mxe): Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:46:16.880796Z ERROR arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:803: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:46:16.880882Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:488: Attempt 5/5: error while calling post_callback_onchain(rpc, &tx, mxe): Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }
+2026-01-29T09:46:16.880916Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:500: Failed to send callback computation tx after retries for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL: Solana("Attempt 5/5: Solana network error: Failed to send callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL error Error { request: None, kind: TransactionError(InstructionError(1, Custom(6000))) }")
+2026-01-29T09:46:16.880933Z  WARN arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:519: Regular callback failed, sending error claim txs for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL
+2026-01-29T09:46:17.178595Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T09:46:17.178729Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T09:46:17.189921Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T09:46:17.189952Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: []
+2026-01-29T09:46:17.189964Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T09:46:17.189973Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:273: Computation executed: ArxComputationReference: 7101387144819530793
+|-> prefetch    : +0ms
+|-> execute     : +0ms
+|-> signed      : +569ms
+|-> executed    : +30830ms
+
+2026-01-29T09:46:17.189987Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:279: Removing computation from execpool: ArxComputationReference offset: 7101387144819530793
+2026-01-29T09:46:17.190005Z DEBUG arx::coordinator: arx/src/coordinator.rs:688: Coordinator received state unit message: executed computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:46:17.190016Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:46:17.190024Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:310: Computation was not yet executed: ArxComputationReference: 7101387144819530793
+2026-01-29T09:46:17.191192Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T09:46:17.191234Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T09:46:17.384039Z DEBUG arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:784: Sent callback computation tx for mxe FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL with sig 5AjPCSbA6ywCzX349xLw8dZ3MymC46yLq3d2HtYxruAg1abqdvDfj2tjs1VJckGYjqcMH6o8h5AAEo1KhC8hU4yJ
+2026-01-29T09:46:17.384119Z DEBUG arx::coordinator: arx/src/coordinator.rs:426: Coordinator received computation transaction unit callback computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:46:17.384137Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:339: Processing executed computation
+2026-01-29T09:46:17.384156Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:302: Processing executed computation: ArxComputationReference: 7101387144819530793
+2026-01-29T09:46:17.384201Z  WARN arx::units::cache_unit: arx/src/units/cache_unit.rs:310: Computation was not yet executed: ArxComputationReference: 7101387144819530793
+2026-01-29T10:01:37.307064Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:01:37.311824Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:01:37.318735Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:01:37.319010Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:01:37.329132Z  INFO arx::program: arx/src/program.rs:338: Re-fetching initial state for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T10:01:37.335658Z  INFO arx::program: arx/src/program.rs:338: Re-fetching initial state for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T10:01:37.347600Z  INFO arx::program: arx/src/program.rs:351: Re-subscribing to account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T10:01:37.347887Z  INFO arx::program: arx/src/program.rs:351: Re-subscribing to account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T10:01:37.348829Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T10:01:37.349349Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T10:01:37.351116Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 0 computations
+2026-01-29T10:01:37.351318Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:132: Execpool contains the same computations, skipping update
+2026-01-29T10:02:25.765835Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9EDLm5KDKc1Pf8m587kdxPMvQBNETNahcCfHLNcQ1M8W
+2026-01-29T10:02:25.765968Z DEBUG arx::program: arx/src/program.rs:317: Received update for account: 9rUSnh5VrMtRUrJrgAUwcyWvL9NYkscAsDFS5RjPW6Da
+2026-01-29T10:02:25.790116Z DEBUG arx::units::execpool_unit: arx/src/units/execpool_unit.rs:102: Received execpool update with 1 computations
+2026-01-29T10:02:25.790886Z DEBUG arx::coordinator: arx/src/coordinator.rs:534: Coordinator received execpool unit message: computations ids: [13253007857152124663]
+2026-01-29T10:02:25.792248Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:99: Received mempool update for account
+2026-01-29T10:02:25.792293Z DEBUG arx::units::mempool_unit: arx/src/units/mempool_unit.rs:129: Mempool contains the same computations, skipping update
+2026-01-29T10:02:25.792330Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:258: Processing execpool update
+2026-01-29T10:02:25.792297Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:154: Processing queued computation: ArxComputationReference: 13253007857152124663
+2026-01-29T10:02:25.792528Z DEBUG arx::units::state_unit: arx/src/units/state_unit.rs:300: Prefetching and executing computation: ArxComputationReference: 13253007857152124663 with status (index: 1, slot: 2671)
+2026-01-29T10:02:25.792800Z DEBUG arx::coordinator: arx/src/coordinator.rs:658: Coordinator received state unit message: prefetch computation: ArxComputationReference: 13253007857152124663
+2026-01-29T10:02:25.793046Z DEBUG arx::coordinator: arx/src/coordinator.rs:668: Coordinator received state unit message: execute computation: ArxComputationReference: 13253007857152124663 with status (index: 1, slot: 2671)
+2026-01-29T10:02:25.798354Z DEBUG arx::coordinator: arx/src/coordinator.rs:470: Coordinator prefetched computation ArxComputation 26325077479481322420803523456623772208 (cluster_offset: 0)
+2026-01-29T10:02:25.798645Z DEBUG arx::coordinator: arx/src/coordinator.rs:486: Coordinator fetched computation ArxComputation 26325077479481322420803523456623772208 (cluster_offset: 0) inputs
+2026-01-29T10:02:25.798659Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:168: Processing fetched computation: ArxComputationReference: 13253007857152124663
+2026-01-29T10:02:25.798875Z DEBUG arx::units::cache_unit: arx/src/units/cache_unit.rs:269: Processing fetched inputs: ArxComputation 26325077479481322420803523456623772208 (cluster_offset: 0)
+2026-01-29T10:02:25.800151Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:243: Processing computation definition: AtDdpxywFm79JA9eQ91ZqKamqVuz1n6xDJFJyNEEfKme
+2026-01-29T10:02:25.802254Z DEBUG arx::units::circuit_unit: arx/src/units/circuit_unit.rs:452: Fetching offchain circuit data from: https://files.catbox.moe/efmtvn.arcis
+2026-01-29T10:02:26.837628Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:02:26.837712Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:02:26.838543Z  WARN arx::program: arx/src/program.rs:323: Pub/sub connection closed or error occurred, reconnecting...
+2026-01-29T10:02:26.838582Z  INFO arx::program: arx/src/program.rs:328: Reconnecting pub/sub client
+2026-01-29T10:02:26.906618Z  WARN arx::program: arx/src/program.rs:372: Attempt 1/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:26.906612Z  WARN arx::program: arx/src/program.rs:372: Attempt 1/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:28.909110Z  WARN arx::program: arx/src/program.rs:372: Attempt 2/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:28.910232Z  WARN arx::program: arx/src/program.rs:372: Attempt 2/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:32.911291Z  WARN arx::program: arx/src/program.rs:372: Attempt 3/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:32.911663Z  WARN arx::program: arx/src/program.rs:372: Attempt 3/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:40.913174Z  WARN arx::program: arx/src/program.rs:372: Attempt 4/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:40.913320Z  WARN arx::program: arx/src/program.rs:372: Attempt 4/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:56.914646Z  WARN arx::program: arx/src/program.rs:372: Attempt 5/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:56.914742Z ERROR arx::program: arx/src/program.rs:332: Failed to reconnect pub/sub client: Solana network error: Attempt 5/5: Solana network error: Failed to create new pub/sub: unable to connect to server, shutting down pub/sub
+2026-01-29T10:02:56.914753Z  INFO arx::program: arx/src/program.rs:367: Pub/sub client stopped
+2026-01-29T10:02:56.914786Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:93: Account channel closed, shutting down
+2026-01-29T10:02:56.914810Z  INFO arx::units::mempool_unit: arx/src/units/mempool_unit.rs:119: Mempool unit stopped
+2026-01-29T10:02:56.915494Z ERROR arx::coordinator: arx/src/coordinator.rs:571: Mempool unit coordinator task received None message, shutting down
+2026-01-29T10:02:56.915805Z  INFO arx::coordinator: arx/src/coordinator.rs:458: Computation unit coordinator task received cancellation signal
+2026-01-29T10:02:56.915819Z  INFO arx::coordinator: arx/src/coordinator.rs:310: Cache unit coordinator task received cancellation signal
+2026-01-29T10:02:56.915839Z  INFO arx::coordinator: arx/src/coordinator.rs:646: State unit coordinator task received cancellation signal
+2026-01-29T10:02:56.915848Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:97: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.915854Z  INFO arx::units::cache_unit: arx/src/units/cache_unit.rs:144: Cache unit stopped
+2026-01-29T10:02:56.915855Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:118: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.915853Z  INFO arx::coordinator: arx/src/coordinator.rs:523: Execpool unit coordinator task received cancellation signal
+2026-01-29T10:02:56.915865Z  INFO arx::units::state_unit: arx/src/units/state_unit.rs:168: State unit stopped
+2026-01-29T10:02:56.915911Z  INFO arx::coordinator: arx/src/coordinator.rs:609: Online phase unit coordinator task received cancellation signal
+2026-01-29T10:02:56.915923Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:91: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.915942Z  INFO arx::units::execpool_unit: arx/src/units/execpool_unit.rs:121: Execpool unit stopped
+2026-01-29T10:02:56.916002Z  INFO arx::coordinator: arx/src/coordinator.rs:271: BLS unit coordinator task received cancellation signal
+2026-01-29T10:02:56.916136Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:108: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.916146Z  INFO arx::coordinator: arx/src/coordinator.rs:368: Circuit unit coordinator task received cancellation signal
+2026-01-29T10:02:56.916148Z  INFO arx::coordinator: arx/src/coordinator.rs:414: Computation transaction unit coordinator task received cancellation signal
+2026-01-29T10:02:56.916157Z  INFO arx::units::computation_unit: arx/src/units/computation_unit.rs:208: Computation unit stopped
+2026-01-29T10:02:56.916173Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:147: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.916202Z  INFO arx::units::circuit_unit: arx/src/units/circuit_unit.rs:232: Circuit unit stopped
+2026-01-29T10:02:56.916273Z  INFO arx::units::bls_unit: arx/src/units/bls_unit.rs:84: Coordinator channel closed, shutting down BLS unit
+2026-01-29T10:02:56.916375Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:130: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.916392Z  INFO arx::units::computation_transaction_unit: arx/src/units/computation_transaction_unit.rs:178: Computations transaction unit stopped
+2026-01-29T10:02:56.916393Z  WARN arx::program: arx/src/program.rs:372: Attempt 5/5: error while calling async
+{
+    PubsubClient::new(wss_url).await.map_err(|e|
+    ArxError::Solana(format!("Failed to create new pub/sub: {}", e)))
+}: Solana network error: Failed to create new pub/sub: unable to connect to server
+2026-01-29T10:02:56.916417Z ERROR arx::program: arx/src/program.rs:332: Failed to reconnect pub/sub client: Solana network error: Attempt 5/5: Solana network error: Failed to create new pub/sub: unable to connect to server, shutting down pub/sub
+2026-01-29T10:02:56.916428Z  INFO arx::program: arx/src/program.rs:367: Pub/sub client stopped
+2026-01-29T10:02:56.916946Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:147: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.916976Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:402: Waiting for computations to finish...
+2026-01-29T10:02:56.916938Z  INFO arx::coordinator: arx/src/coordinator.rs:707: Coordinator cancellation token triggered, shutting down
+2026-01-29T10:02:56.918377Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:91: Coordinator channel closed, shutting down
+2026-01-29T10:02:56.918395Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:108: Deactivating node
+2026-01-29T10:02:56.918457Z DEBUG arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:420: Unregistered bundler 248016683086310656528149261543419493072 during shutdown
+2026-01-29T10:02:56.918557Z  INFO arx::units::online_phase_unit: arx/src/units/online_phase_unit.rs:425: Online phase unit stopped
+2026-01-29T10:02:56.919593Z  INFO arx: arx/src/main.rs:136: Shutdown channel closed, initiating shutdown
+2026-01-29T10:02:56.919635Z  INFO arx: arx/src/main.rs:142: ARX shutting down, waiting for units to complete
+2026-01-29T10:02:56.921818Z  WARN arx::program: arx/src/program.rs:158: Attempt 1/5: error while calling async
+{
+    self.account(account).await.map_err(|e|
+    {
+        ArxError::Solana(format!("Failed to fetch account {}: {}", account,
+        e))
+    })
+}: Solana network error: Failed to fetch account 6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: AccountNotFound: pubkey=6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T10:02:58.926792Z  WARN arx::program: arx/src/program.rs:158: Attempt 2/5: error while calling async
+{
+    self.account(account).await.map_err(|e|
+    {
+        ArxError::Solana(format!("Failed to fetch account {}: {}", account,
+        e))
+    })
+}: Solana network error: Failed to fetch account 6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: AccountNotFound: pubkey=6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T10:03:02.928742Z  WARN arx::program: arx/src/program.rs:158: Attempt 3/5: error while calling async
+{
+    self.account(account).await.map_err(|e|
+    {
+        ArxError::Solana(format!("Failed to fetch account {}: {}", account,
+        e))
+    })
+}: Solana network error: Failed to fetch account 6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: AccountNotFound: pubkey=6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T10:03:10.933235Z  WARN arx::program: arx/src/program.rs:158: Attempt 4/5: error while calling async
+{
+    self.account(account).await.map_err(|e|
+    {
+        ArxError::Solana(format!("Failed to fetch account {}: {}", account,
+        e))
+    })
+}: Solana network error: Failed to fetch account 6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: AccountNotFound: pubkey=6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ: error sending request for url (http://host.docker.internal:8899/)
+2026-01-29T10:03:26.936343Z DEBUG arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:157: Node is already inactive, skipping deactivation
+2026-01-29T10:03:26.936779Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:111: Node deactivated
+2026-01-29T10:03:26.936790Z  INFO arx::units::node_transaction_unit: arx/src/units/node_transaction_unit.rs:119: Node transaction unit stopped

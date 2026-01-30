@@ -1,0 +1,16 @@
+
+    {
+      "pubkey": "6vNwQe3fiU1u4JxTM2XkvPou9uH7EZNrskLZJrRYM8WJ",
+      "account": {
+        "lamports": 1000000000000,
+        "data": [
+          "As96311h58d9EzCh+jCF2/xwXzI9k/qeZnzd5mMydkD2LeWrh3oocQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAArBQAZXfBuK8YHquAUTYFiBbmbfBvTcGCKlmGV2Qihv83tWWkAPF3m5gDV0+cGTtd4yd1+bvZcqOA8YDPhAhwhmYbA5LJOr2zZbiZGNIaD1u2yUFpvMeavRFKlVRP+DHPvx+19HwBAAAAAADh9QUAAAAAAInTD/0DO6lLqNtivRJXoIEH5GExxDGUkrGi4ZPl8OdQA8PzONJseu5chp4Zk4EDz1I/50Ma/f4eoawdOnoEYyb+",
+          "base64"
+        ],
+        "owner": "Arcj82pX7HxYKLR92qvgZUAd7vGS1k4hQvAFcPATFdEQ",
+        "executable": false,
+        "rentEpoch": 0,
+        "space": 2000
+      }
+    }
+    
