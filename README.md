@@ -1,6 +1,6 @@
 # Zodiac Liquidity
 
-Privacy protocol for LPers using Arcium MPC and zk mixer. Supports DAMM v2 pools (DLMM coming soon).
+Privacy protocol for LPers using Arcium MPC and zk mixer. Supports Meteora DAMM v2 pools (DLMM coming soon).
 
 ## The Problem
 
