@@ -2,13 +2,13 @@
 
 ## Overview
 
-Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium's Cerberus MPC protocol.
+Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium's Cerberus MPC protocol and a ZK mixer for identity unlinkability.
 
-**Goal:** Enable private LP deposits/withdrawals while aggregating liquidity publicly. Users' individual amounts and positions remain hidden. Protocol PDA deploys to Meteora, breaking user → LP linkability.
+**Goal:** Enable private LP deposits/withdrawals while aggregating liquidity publicly. Users' individual amounts and positions remain hidden. A ZK mixer breaks the user-to-deposit link, and a Protocol relay PDA deploys to Meteora, breaking the deposit-to-LP link.
 
 ## Project Status
 
-**Phase:** Devnet + Localnet COMPLETE (16/16 tests pass on both)
+**Phase:** Devnet + Localnet COMPLETE (29/29 tests pass on both)
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -20,15 +20,20 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - Arcium documentation in `/docs/arcium/`
 - Arcis circuits in `encrypted-ixs/src/lib.rs`
 - Anchor program with Arcium integration complete
-- Meteora DAMM v2 CPI integrated
+- Meteora DAMM v2 CPI integrated (pool creation, position creation, deposit, withdraw)
+- Relay PDA management (fund_relay, relay_transfer_to_destination)
 - Circuits uploaded to GitHub offchain storage (`outsmartchad/zodiac-circuits`)
 - Computation definitions use `CircuitSource::OffChain`
+- Meta-tx code removed (not needed for relay architecture)
+- DAMM v2 `[[test.genesis]]` configured for localnet
 - **Fixed:** `withdraw` and `get_user_position` ArgBuilder mismatch (missing `shared_nonce` for `Shared` type)
 - **Renamed:** `record_lp_tokens` → `record_liquidity` (Meteora uses "liquidity" not "LP tokens")
 - **Added:** `clear_position` instruction + callback + tests
 - **Added:** `record_liquidity` tests
-- **Devnet (2026-01-29):** All 16 tests pass on `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
-  - 8 comp def inits + vault + user position + deposit + reveal + record_liquidity + compute_withdrawal + clear_position + get_user_position
+- **Added:** `fund_relay`, `relay_transfer_to_destination` instructions + tests
+- **Added:** `create_pool_via_relay`, `create_customizable_pool_via_relay`, `create_meteora_position` instructions + tests
+- **Added:** `deposit_to_meteora_damm_v2`, `withdraw_from_meteora_damm_v2` instructions + tests
+- **Localnet + Devnet (2026-01-30):** All 29 tests pass on `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -38,6 +43,15 @@ The `.idarc` circuit descriptor shows `Shared` parameters require BOTH `arcis_x2
 - Added `shared_nonce: u128` parameter to `withdraw()` and `get_user_position()` instructions
 - Added `.plaintext_u128(shared_nonce)` after `.x25519_pubkey()` in ArgBuilder chain
 - Tests updated to generate and pass `sharedNonce`
+
+## Phases Overview
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| **Phase 1** | Zodiac Program (Arcium MPC + Meteora CPI + Relay PDA) | **COMPLETE** (29/29 tests) |
+| **Phase 2** | ZK Mixer Program (scaffolded in `privacy-cash/`) | Not implemented |
+| **Phase 3** | Client SDK (TypeScript library for frontend integration) | Not started |
+| **Phase 4** | Relayer Service (off-chain service for mixer withdraw proofs) | Not started |
 
 ## Tech Stack
 
@@ -173,42 +187,89 @@ await program.methods.initVaultCompDef()
 
 ## Architecture
 
-### Privacy Flow (Protocol-Managed Deployment)
+### Full Protocol Architecture (4 Layers)
 
 ```
-User A ──┐
-User B ──┼── deposit(encrypted_amt) ──> VaultAccount ──> Protocol PDA ──> Meteora DAMM v2
-User C ──┘                              (Arcium MPC)     (signs CPI)
-                                             │
-                                             ▼
-                                    Arcium MPC Cluster
-                                    - Aggregates deposits
-                                    - Tracks positions
-                                    - Computes withdrawals
+DEPOSIT FLOW:
+User wallet → ZK Mixer (breaks identity link) → Ephemeral wallet → Zodiac vault (Arcium encrypts amount)
+                                                                          ↓
+                                                                Relay PDA → Meteora pool (add_liquidity CPI)
+                                                                (single aggregate position, PDA holds NFT)
+
+WITHDRAWAL FLOW:
+User requests → Arcium computes share → Relay PDA removes liquidity from Meteora
+                                      → relay_transfer_to_destination → Ephemeral wallet
 ```
 
-**What's hidden:**
+### Full Transaction Flow (11 Steps)
+
+```
+ 1. [user]       mixer.transact(proof)           -- deposit SOL/SPL to mixer
+ 2. [relayer]    mixer.transact(proof)           -- withdraw to ephemeral wallet
+ 3. [ephemeral]  zodiac.deposit(encrypted_amt)   -- deposit to vault
+ 4. [authority]  zodiac.reveal_pending_deposits() -- Arcium reveals aggregate
+ 5. [authority]  zodiac.fund_relay(idx, amount)   -- vault → relay PDA
+ 6. [authority]  zodiac.deposit_to_meteora(...)   -- relay PDA → Meteora add_liquidity
+ 7. [authority]  zodiac.record_liquidity(delta)   -- record in Arcium
+ --- withdrawal ---
+ 8. [ephemeral]  zodiac.withdraw(pubkey, nonce)   -- Arcium computes share
+ 9. [authority]  zodiac.withdraw_from_meteora(...) -- relay removes liquidity
+10. [authority]  zodiac.relay_transfer_to_dest()  -- relay → ephemeral wallet
+11. [authority]  zodiac.clear_position(amount)    -- zero Arcium state
+```
+
+### What's Hidden vs Visible
+
+**Hidden:**
 - Individual deposit/withdrawal amounts
 - User's liquidity position size
 - User → Meteora position linkability (Protocol PDA deploys, not user)
+- User → deposit linkability (via ZK mixer, ephemeral wallets)
 
-**What's visible:**
-- That a user deposited to Zodiac (but not how much)
+**Visible:**
+- That *someone* deposited to the mixer (but not who withdrew or how much)
 - Total aggregated liquidity in Meteora pool
 
-### Full Lifecycle (Test Order)
+### All Program Instructions
 
-```
-1.  init comp defs (8 total)
-2.  create vault                    → encrypted VaultState initialized
-3.  create user position            → encrypted UserPosition initialized
-4.  deposit 1 token                 → vault + position updated
-5.  reveal pending deposits         → shows 1 token aggregate (plaintext)
-6.  record_liquidity(500M)          → records liquidity, resets pending to 0
-7.  compute withdrawal              → returns encrypted deposit amount
-8.  clear_position(1 token)         → zeros user position, deducts from vault
-9.  get user position               → shows position after clear
-```
+**MPC Comp Def Inits (8):**
+| Instruction | Circuit |
+|------------|---------|
+| `init_vault_comp_def` | `init_vault` |
+| `init_user_position_comp_def` | `init_user_position` |
+| `init_deposit_comp_def` | `deposit` |
+| `init_reveal_pending_comp_def` | `reveal_pending_deposits` |
+| `init_record_liquidity_comp_def` | `record_liquidity` |
+| `init_withdraw_comp_def` | `compute_withdrawal` |
+| `init_get_position_comp_def` | `get_user_position` |
+| `init_clear_position_comp_def` | `clear_position` |
+
+**MPC Operations (8 queue + 8 callbacks = 16):**
+| Instruction | Purpose |
+|------------|---------|
+| `create_vault` / `init_vault_callback` | Initialize encrypted vault state |
+| `create_user_position` / `init_user_position_callback` | Initialize encrypted user position |
+| `deposit` / `deposit_callback` | Add encrypted deposit, update vault + position |
+| `reveal_pending_deposits` / `reveal_pending_deposits_callback` | Reveal aggregate for Meteora deployment |
+| `record_liquidity` / `record_liquidity_callback` | Record liquidity received from Meteora |
+| `withdraw` / `compute_withdrawal_callback` | Compute user's share (encrypted for user) |
+| `clear_position` / `clear_position_callback` | Zero position after withdrawal confirmed |
+| `get_user_position` / `get_user_position_callback` | Let user see their own position |
+
+**Relay Management (2):**
+| Instruction | Purpose |
+|------------|---------|
+| `fund_relay` | Transfer tokens from authority to relay PDA's token account |
+| `relay_transfer_to_destination` | Transfer tokens from relay PDA to destination (e.g., ephemeral wallet) |
+
+**Meteora CPI (5):**
+| Instruction | Purpose |
+|------------|---------|
+| `create_pool_via_relay` | Create Meteora pool via relay PDA (config-based) |
+| `create_customizable_pool_via_relay` | Create customizable Meteora pool via relay PDA |
+| `create_meteora_position` | Create a Meteora position for relay PDA + track via RelayPositionTracker |
+| `deposit_to_meteora_damm_v2` | Add liquidity to Meteora pool via relay PDA CPI |
+| `withdraw_from_meteora_damm_v2` | Remove liquidity from Meteora pool via relay PDA CPI |
 
 ### Arcis Circuits (MPC Operations)
 
@@ -429,55 +490,49 @@ CircuitSource::OffChain(OffChainCircuitSource {
 docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*.json"
 ```
 
-## Localnet Test Results (2026-01-30)
+## Test Results (2026-01-30)
 
-**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (localnet, with meta_nonce field)
+### Localnet (29/29 passing)
+
+**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 
 | # | Test | Status |
 |---|------|--------|
-| 1 | init_vault comp def | PASS (403ms) |
-| 2 | init_user_position comp def | PASS (405ms) |
-| 3 | deposit comp def | PASS (406ms) |
-| 4 | reveal_pending_deposits comp def | PASS (406ms) |
-| 5 | record_liquidity comp def | PASS (406ms) |
-| 6 | compute_withdrawal comp def | PASS (410ms) |
-| 7 | get_user_position comp def | PASS (416ms) |
-| 8 | clear_position comp def | PASS (407ms) |
-| 9 | creates a new vault | PASS (884ms) |
-| 10 | creates a user position | PASS (813ms) |
-| 11 | deposits tokens (encrypted) | PASS (2444ms) |
-| 12 | reveals pending deposits | PASS (907ms) |
-| 13 | records liquidity from Meteora | PASS (795ms) |
-| 14 | computes withdrawal for user | PASS (1206ms) |
-| 15 | clears user position | PASS (800ms) |
-| 16 | gets user position | PASS (1200ms) |
+| 1 | init_vault comp def | PASS |
+| 2 | init_user_position comp def | PASS |
+| 3 | deposit comp def | PASS |
+| 4 | reveal_pending_deposits comp def | PASS |
+| 5 | record_liquidity comp def | PASS |
+| 6 | compute_withdrawal comp def | PASS |
+| 7 | get_user_position comp def | PASS |
+| 8 | clear_position comp def | PASS |
+| 9 | creates a new vault | PASS |
+| 10 | creates a user position | PASS |
+| 11 | deposits tokens (encrypted) | PASS |
+| 12 | reveals pending deposits | PASS |
+| 13 | records liquidity from Meteora | PASS |
+| 14 | computes withdrawal for user | PASS |
+| 15 | clears user position | PASS |
+| 16 | gets user position | PASS |
+| 17 | transfers tokens from relay PDA to destination | PASS |
+| 18 | fails relay transfer with wrong authority | PASS |
+| 19 | fails relay transfer with invalid relay index | PASS |
+| 20 | funds a relay PDA token account | PASS |
+| 21 | fails fund_relay with wrong authority | PASS |
+| 22 | creates a customizable pool via relay PDA | PASS |
+| 23 | fails create_customizable_pool with wrong authority | PASS |
+| 24 | fails create_customizable_pool with invalid relay index | PASS |
+| 25 | creates a Meteora position for relay PDA | PASS |
+| 26 | deposits liquidity to Meteora via relay PDA | PASS |
+| 27 | withdraws liquidity from Meteora via relay PDA | PASS |
+| 28 | fails deposit_to_meteora with wrong authority | PASS |
+| 29 | fails withdraw_from_meteora with wrong authority | PASS |
 
-**16 passing (14s)** — GitHub circuit URLs work fine from ARX Docker nodes.
-
-## Devnet Test Results (2026-01-29)
+### Devnet (29/29 passing)
 
 **Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (cluster 456)
 
-| # | Test | Status |
-|---|------|--------|
-| 1 | init_vault comp def | PASS (skipped, exists) |
-| 2 | init_user_position comp def | PASS (skipped, exists) |
-| 3 | deposit comp def | PASS (skipped, exists) |
-| 4 | reveal_pending_deposits comp def | PASS (skipped, exists) |
-| 5 | record_liquidity comp def | PASS (654ms) |
-| 6 | compute_withdrawal comp def | PASS (skipped, exists) |
-| 7 | get_user_position comp def | PASS (skipped, exists) |
-| 8 | clear_position comp def | PASS (skipped, exists) |
-| 9 | creates a new vault | PASS (2042ms) |
-| 10 | creates a user position | PASS (2145ms) |
-| 11 | deposits tokens (encrypted) | PASS (4909ms) |
-| 12 | reveals pending deposits | PASS (2242ms) |
-| 13 | records liquidity from Meteora | PASS (2519ms) |
-| 14 | computes withdrawal for user | PASS (2868ms) |
-| 15 | clears user position | PASS (2621ms) |
-| 16 | gets user position | PASS (2827ms) |
-
-**16 passing (25s)**
+Same 29 tests pass on devnet (comp defs skip if already initialized). Transient RPC 403 rate limits may cause sporadic failures on individual runs — all tests have passed across runs.
 
 ## Arcium Diagnostic Commands
 

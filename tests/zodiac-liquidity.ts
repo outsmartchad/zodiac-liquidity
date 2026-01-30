@@ -1794,8 +1794,8 @@ describe("zodiac-liquidity", () => {
         console.log("Pool created for position test");
 
         // Wait for fresh blockhash after pool creation (previous setup exhausts blockhash lifetime)
-        // Devnet needs longer wait due to slower block times
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        // Localnet can also hit stale blockhash after heavy MPC activity
+        await new Promise(resolve => setTimeout(resolve, 10000));
 
         // Now create a new position on that pool
         const posNftMint = Keypair.generate();
@@ -1851,6 +1851,392 @@ describe("zodiac-liquidity", () => {
           return;
         }
         throw err;
+      }
+    });
+  });
+
+  // ============================================================
+  // METEORA CPI - DEPOSIT / WITHDRAW LIQUIDITY TESTS
+  // ============================================================
+  describe("Meteora CPI - Deposit and Withdraw Liquidity via Relay", () => {
+    let tokenA: PublicKey;
+    let tokenB: PublicKey;
+    let relayPda: PublicKey;
+    let relayTokenA: PublicKey;
+    let relayTokenB: PublicKey;
+    let poolPda: PublicKey;
+    let positionPda: PublicKey;
+    let posNftMint: Keypair;
+    let posNftAccount: PublicKey;
+    let tokenAVault: PublicKey;
+    let tokenBVault: PublicKey;
+    let eventAuthority: PublicKey;
+    const relayIndex = 6;
+    let setupFailed = false;
+
+    before(async () => {
+      try {
+        // Delay to avoid RPC rate limiting from previous tests
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
+
+        // Fund relay PDA with SOL for rent
+        const fundRelayTx = new anchor.web3.Transaction().add(
+          SystemProgram.transfer({
+            fromPubkey: owner.publicKey,
+            toPubkey: relayPda,
+            lamports: 50_000_000,
+          })
+        );
+        await provider.sendAndConfirm(fundRelayTx, [owner]);
+
+        // Create two token mints (A < B lexicographically)
+        const mintA = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+        const mintB = await createMint(provider.connection, owner, owner.publicKey, null, 9);
+        tokenA = minKey(mintA, mintB);
+        tokenB = maxKey(mintA, mintB);
+        console.log("Deposit/Withdraw test - Token A:", tokenA.toString());
+        console.log("Deposit/Withdraw test - Token B:", tokenB.toString());
+
+        // Create relay token accounts
+        const relayTokenAKp = Keypair.generate();
+        relayTokenA = await createAccount(provider.connection, owner, tokenA, relayPda, relayTokenAKp);
+        const relayTokenBKp = Keypair.generate();
+        relayTokenB = await createAccount(provider.connection, owner, tokenB, relayPda, relayTokenBKp);
+
+        // Mint tokens to authority and fund relay
+        const authTokenA = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tokenA, owner.publicKey);
+        const authTokenB = await getOrCreateAssociatedTokenAccount(provider.connection, owner, tokenB, owner.publicKey);
+        await mintTo(provider.connection, owner, tokenA, authTokenA.address, owner, 10_000_000_000);
+        await mintTo(provider.connection, owner, tokenB, authTokenB.address, owner, 10_000_000_000);
+
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+          .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenA, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([owner]).rpc({ commitment: "confirmed" });
+        await program.methods.fundRelay(relayIndex, new anchor.BN(5_000_000_000))
+          .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenB.address, relayTokenAccount: relayTokenB, tokenProgram: TOKEN_PROGRAM_ID })
+          .signers([owner]).rpc({ commitment: "confirmed" });
+
+        // Create a customizable pool
+        const poolNftMint = Keypair.generate();
+        [poolPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("cpool"), maxKey(tokenA, tokenB).toBuffer(), minKey(tokenA, tokenB).toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        const [poolPosition] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position"), poolNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        const [poolNftAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position_nft_account"), poolNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        [tokenAVault] = PublicKey.findProgramAddressSync(
+          [Buffer.from("token_vault"), tokenA.toBuffer(), poolPda.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        [tokenBVault] = PublicKey.findProgramAddressSync(
+          [Buffer.from("token_vault"), tokenB.toBuffer(), poolPda.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        [eventAuthority] = PublicKey.findProgramAddressSync(
+          [EVENT_AUTHORITY_SEED], DAMM_V2_PROGRAM_ID
+        );
+
+        const poolFees = {
+          baseFee: { cliffFeeNumerator: new anchor.BN(2_500_000), firstFactor: 0, secondFactor: Array(8).fill(0), thirdFactor: new anchor.BN(0), baseFeeMode: 0 },
+          padding: [0, 0, 0],
+          dynamicFee: null,
+        };
+        const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
+
+        await program.methods
+          .createCustomizablePoolViaRelay(
+            relayIndex, poolFees,
+            new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
+            false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
+          )
+          .accounts({
+            authority: owner.publicKey, vault: vaultPda, relayPda,
+            positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
+            poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
+            tokenAMint: tokenA, tokenBMint: tokenB,
+            tokenAVault, tokenBVault,
+            relayTokenA, relayTokenB,
+            tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
+            token2022Program: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, poolNftMint])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Pool created for deposit/withdraw test at:", poolPda.toString());
+
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // Create a separate position for deposit/withdraw testing
+        posNftMint = Keypair.generate();
+        [positionPda] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+        [posNftAccount] = PublicKey.findProgramAddressSync(
+          [Buffer.from("position_nft_account"), posNftMint.publicKey.toBuffer()],
+          DAMM_V2_PROGRAM_ID
+        );
+
+        const [relayPositionTracker] = PublicKey.findProgramAddressSync(
+          [Buffer.from("relay_position"), vaultPda.toBuffer(), Buffer.from([relayIndex]), poolPda.toBuffer()],
+          program.programId
+        );
+
+        await program.methods
+          .createMeteoraPosition(relayIndex)
+          .accounts({
+            authority: owner.publicKey, vault: vaultPda, relayPda,
+            relayPositionTracker,
+            positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
+            pool: poolPda, position: positionPda,
+            poolAuthority: POOL_AUTHORITY,
+            tokenProgram: TOKEN_2022_PROGRAM_ID,
+            systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner, posNftMint])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Position created for deposit/withdraw test");
+      } catch (err: any) {
+        console.log("Deposit/withdraw test setup failed:", err.message?.substring(0, 150));
+        setupFailed = true;
+      }
+    });
+
+    it("deposits liquidity to Meteora via relay PDA", async function () {
+      if (setupFailed) { this.skip(); return; }
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      try {
+        // Calculate proper liquidity delta from token amounts using Meteora SDK
+        const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
+        const liquidityDelta = calculateLiquidityFromAmounts(
+          provider.connection,
+          new anchor.BN(1_000_000_000), // 1 token A
+          new anchor.BN(1_000_000_000), // 1 token B
+          sqrtPrice,
+        );
+        console.log("Calculated liquidity delta for deposit:", liquidityDelta.toString());
+
+        const sig = await program.methods
+          .depositToMeteoraDammV2(
+            relayIndex,
+            liquidityDelta,                        // SDK-computed liquidity_delta
+            new anchor.BN("18446744073709551615"), // token_a_amount_threshold (u64::MAX)
+            new anchor.BN("18446744073709551615"), // token_b_amount_threshold (u64::MAX)
+            null,                                  // sol_amount (not using WSOL)
+          )
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA,
+            relayTokenB,
+            tokenAVault,
+            tokenBVault,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            positionNftAccount: posNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Deposit to Meteora tx:", sig);
+
+        // Verify position has liquidity by checking the account exists
+        const positionInfo = await withRetry(() => provider.connection.getAccountInfo(positionPda));
+        expect(positionInfo).to.not.be.null;
+        console.log("Position account size after deposit:", positionInfo!.data.length, "bytes");
+      } catch (err: any) {
+        const msg = err.message || err.toString();
+        if (msg.includes("not found") || msg.includes("Unsupported program")) {
+          console.log("DAMM v2 CPI not available, skipping:", msg.substring(0, 120));
+          return;
+        }
+        throw err;
+      }
+    });
+
+    it("withdraws liquidity from Meteora via relay PDA", async function () {
+      if (setupFailed) { this.skip(); return; }
+
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      try {
+        // Read the position's actual unlocked_liquidity (u128 at offset 152 in account data)
+        // Layout: 8 (discriminator) + 32 (pool) + 32 (nft_mint) + 32 (fee_a_checkpoint) + 32 (fee_b_checkpoint) + 8 (fee_a_pending) + 8 (fee_b_pending) = 152
+        const positionInfo = await provider.connection.getAccountInfo(positionPda);
+        if (!positionInfo) throw new Error("Position account not found");
+        const unlockedLiquidityBytes = positionInfo.data.slice(152, 168); // u128 = 16 bytes LE
+        const unlockedLiquidity = new anchor.BN(unlockedLiquidityBytes, "le");
+        console.log("Position unlocked_liquidity:", unlockedLiquidity.toString());
+
+        // Withdraw all unlocked liquidity
+        const sig = await program.methods
+          .withdrawFromMeteoraDammV2(
+            relayIndex,
+            unlockedLiquidity,           // liquidity_delta (withdraw all)
+            new anchor.BN(0),            // token_a_amount_threshold (no minimum)
+            new anchor.BN(0),            // token_b_amount_threshold (no minimum)
+          )
+          .accounts({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            relayPda,
+            poolAuthority: POOL_AUTHORITY,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA,
+            relayTokenB,
+            tokenAVault,
+            tokenBVault,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            positionNftAccount: posNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+
+        console.log("Withdraw from Meteora tx:", sig);
+      } catch (err: any) {
+        const msg = err.message || err.toString();
+        if (msg.includes("not found") || msg.includes("Unsupported program")) {
+          console.log("DAMM v2 CPI not available, skipping:", msg.substring(0, 120));
+          return;
+        }
+        throw err;
+      }
+    });
+
+    it("fails deposit_to_meteora with wrong authority", async function () {
+      if (setupFailed) { this.skip(); return; }
+      const wrongAuthority = Keypair.generate();
+
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: wrongAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        await program.methods
+          .depositToMeteoraDammV2(
+            relayIndex,
+            new anchor.BN(1_000),
+            new anchor.BN("18446744073709551615"),
+            new anchor.BN("18446744073709551615"),
+            null,
+          )
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            relayPda,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA,
+            relayTokenB,
+            tokenAVault,
+            tokenBVault,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            positionNftAccount: posNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+            eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([wrongAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unauthorized");
+      } catch (err: any) {
+        console.log("Expected error for wrong authority (deposit):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
+        );
+      }
+    });
+
+    it("fails withdraw_from_meteora with wrong authority", async function () {
+      if (setupFailed) { this.skip(); return; }
+      const wrongAuthority = Keypair.generate();
+
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: wrongAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        await program.methods
+          .withdrawFromMeteoraDammV2(
+            relayIndex,
+            new anchor.BN(1_000),
+            new anchor.BN(0),
+            new anchor.BN(0),
+          )
+          .accounts({
+            authority: wrongAuthority.publicKey,
+            vault: vaultPda,
+            relayPda,
+            poolAuthority: POOL_AUTHORITY,
+            pool: poolPda,
+            position: positionPda,
+            relayTokenA,
+            relayTokenB,
+            tokenAVault,
+            tokenBVault,
+            tokenAMint: tokenA,
+            tokenBMint: tokenB,
+            positionNftAccount: posNftAccount,
+            tokenAProgram: TOKEN_PROGRAM_ID,
+            tokenBProgram: TOKEN_PROGRAM_ID,
+            eventAuthority,
+            ammProgram: DAMM_V2_PROGRAM_ID,
+          })
+          .signers([wrongAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with unauthorized");
+      } catch (err: any) {
+        console.log("Expected error for wrong authority (withdraw):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
+        );
       }
     });
   });

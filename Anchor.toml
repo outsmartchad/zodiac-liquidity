@@ -18,7 +18,7 @@ zodiac_mixer = "H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "https://devnet-rpc.shyft.to?api_key=_xvtt0m0rZKRJJ9S"
+cluster = "Localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
