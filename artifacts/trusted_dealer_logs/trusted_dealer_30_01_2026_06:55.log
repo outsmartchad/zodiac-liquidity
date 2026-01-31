@@ -1,3 +1,0 @@
-2026-01-30T06:55:55.858060Z  INFO trusted_dealer: trusted-dealer/src/main.rs:50: Crypto initialized
-2026-01-30T06:55:55.858459Z  INFO trusted_dealer::dealer: trusted-dealer/src/dealer.rs:383: Fetching cluster accounts...
-2026-01-30T06:55:55.858750Z  INFO trusted_dealer::solana: trusted-dealer/src/solana.rs:24: Will fetch cluster account for offset: 0

@@ -10,5 +10,5 @@ build/
 *.txt
 .env
 *.pem
-artifacts/arx_node_logs/
+artifacts/
 logs/
