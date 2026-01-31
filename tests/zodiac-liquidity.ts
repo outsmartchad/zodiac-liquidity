@@ -182,6 +182,7 @@ async function queueWithRetry(
       } else {
         console.log(`[${label}] Attempt ${attempt} error:`, err.message || err);
         if (err.logs) console.log(`[${label}] Logs:`, err.logs);
+        if (err.simulationResponse?.logs) console.log(`[${label}] Simulation logs:`, err.simulationResponse.logs);
       }
       if (attempt < MAX_COMPUTATION_RETRIES) {
         console.log(`[${label}] Retrying in ${RETRY_DELAY_MS}ms...`);
@@ -403,7 +404,7 @@ async function setupEphemeralWallet(
   provider: anchor.AnchorProvider,
   owner: Keypair,
   vaultPda: PublicKey,
-  fundLamports: number = 50_000_000,
+  fundLamports: number = 100_000_000,
 ): Promise<{ ephemeralKp: Keypair; ephemeralPda: PublicKey }> {
   const ephemeralKp = Keypair.generate();
   const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKp.publicKey, program.programId);
@@ -430,6 +431,9 @@ async function setupEphemeralWallet(
     })
   );
   await provider.sendAndConfirm(fundTx, [owner]);
+
+  // Wait for funding to settle on localnet (prevents "Attempt to debit" errors)
+  await new Promise(resolve => setTimeout(resolve, 1000));
 
   console.log("Ephemeral wallet created:", ephemeralKp.publicKey.toString(), "PDA:", ephemeralPda.toString());
   console.log("  [SIGNER] registerEphemeralWallet => authority (owner):", owner.publicKey.toString());
@@ -530,6 +534,7 @@ describe("zodiac-liquidity", () => {
   let owner: Keypair;
   let relayer: Keypair;
   let tokenMint: PublicKey;
+  let quoteMint: PublicKey; // WSOL (NATIVE_MINT)
   let vaultPda: PublicKey;
   let userPositionPda: PublicKey;
   let mxePublicKey: Uint8Array;
@@ -551,11 +556,11 @@ describe("zodiac-liquidity", () => {
       SystemProgram.transfer({
         fromPubkey: owner.publicKey,
         toPubkey: relayer.publicKey,
-        lamports: 500_000_000, // 0.5 SOL
+        lamports: 7_000_000_000, // 7 SOL (3 sections × 2 SOL relay rent + WSOL funding; returned after tests)
       })
     );
     await provider.sendAndConfirm(fundRelayerTx, [owner]);
-    console.log("Relayer:", relayer.publicKey.toString(), "(funded with 0.5 SOL)");
+    console.log("Relayer:", relayer.publicKey.toString(), "(funded with 7 SOL)");
 
     // Get MXE public key for encryption
     try {
@@ -588,6 +593,10 @@ describe("zodiac-liquidity", () => {
       9 // 9 decimals
     );
     console.log("Token mint:", tokenMint.toString());
+
+    // Quote mint is WSOL (NATIVE_MINT)
+    quoteMint = NATIVE_MINT;
+    console.log("Quote mint (WSOL):", quoteMint.toString());
 
     // Derive vault PDA
     [vaultPda] = PublicKey.findProgramAddressSync(
@@ -652,12 +661,13 @@ describe("zodiac-liquidity", () => {
     await queueWithRetry(
       "createVault",
       async (computationOffset) => {
-        return program.methods
+        const txBuilder = program.methods
           .createVault(computationOffset, new anchor.BN(deserializeLE(vaultNonce).toString()))
           .accountsPartial({
             authority: owner.publicKey,
             vault: vaultPda,
             tokenMint: tokenMint,
+            quoteMint: quoteMint,
             signPdaAccount,
             computationAccount: getComputationAccAddress(
               getArciumEnv().arciumClusterOffset,
@@ -675,8 +685,8 @@ describe("zodiac-liquidity", () => {
             clockAccount: getClockAccAddress(),
             systemProgram: SystemProgram.programId,
           })
-          .signers([owner])
-          .rpc({ skipPreflight: true, commitment: "confirmed" });
+          .signers([owner]);
+        return txBuilder.rpc({ commitment: "confirmed" });
       },
       provider,
       program.programId,
@@ -684,9 +694,11 @@ describe("zodiac-liquidity", () => {
 
     const vaultAccount = await program.account.vaultAccount.fetch(vaultPda);
     console.log("Vault created, authority:", vaultAccount.authority.toString());
-    console.log("Vault state[0] (pending_deposits):", Buffer.from(vaultAccount.vaultState[0]).toString("hex"));
-    console.log("Vault state[1] (total_liquidity):", Buffer.from(vaultAccount.vaultState[1]).toString("hex"));
-    console.log("Vault state[2] (total_deposited):", Buffer.from(vaultAccount.vaultState[2]).toString("hex"));
+    console.log("Vault state[0] (pending_base):", Buffer.from(vaultAccount.vaultState[0]).toString("hex"));
+    console.log("Vault state[1] (pending_quote):", Buffer.from(vaultAccount.vaultState[1]).toString("hex"));
+    console.log("Vault state[2] (total_liquidity):", Buffer.from(vaultAccount.vaultState[2]).toString("hex"));
+    console.log("Vault state[3] (total_base_deposited):", Buffer.from(vaultAccount.vaultState[3]).toString("hex"));
+    console.log("Vault state[4] (total_quote_deposited):", Buffer.from(vaultAccount.vaultState[4]).toString("hex"));
 
     // Create user position via MPC
     console.log("Creating user position via MPC...");
@@ -734,13 +746,14 @@ describe("zodiac-liquidity", () => {
       // Delay to avoid RPC rate limiting from previous test
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // Encrypt the deposit amount
-      const depositAmount = BigInt(1_000_000_000); // 1 token with 9 decimals
-      const plaintext = [depositAmount];
+      // Encrypt the deposit amounts (base + quote)
+      const baseDepositAmount = BigInt(1_000_000_000); // 1 base token with 9 decimals
+      const quoteDepositAmount = BigInt(500_000_000);  // 0.5 SOL (WSOL) with 9 decimals
+      const plaintext = [baseDepositAmount, quoteDepositAmount];
       const nonce = randomBytes(16);
       const ciphertext = cipher.encrypt(plaintext, nonce);
 
-      // Create user token account and mint tokens
+      // Create user base token account and mint tokens
       const userTokenAccount = await getOrCreateAssociatedTokenAccount(
         provider.connection,
         owner,
@@ -757,11 +770,38 @@ describe("zodiac-liquidity", () => {
         2_000_000_000 // Mint 2 tokens
       );
 
-      // Create vault token account
+      // Create vault base token account
       const vaultTokenAccount = await getOrCreateAssociatedTokenAccount(
         provider.connection,
         owner,
         tokenMint,
+        vaultPda,
+        true // allowOwnerOffCurve for PDA
+      );
+
+      // Create user WSOL token account (wrap SOL)
+      const userQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        NATIVE_MINT,
+        owner.publicKey
+      );
+      // Wrap SOL into WSOL
+      const wrapTx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: userQuoteTokenAccount.address,
+          lamports: 1_000_000_000, // 1 SOL
+        }),
+        createSyncNativeInstruction(userQuoteTokenAccount.address)
+      );
+      await provider.sendAndConfirm(wrapTx, [owner]);
+
+      // Create vault WSOL token account
+      const vaultQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        owner,
+        NATIVE_MINT,
         vaultPda,
         true // allowOwnerOffCurve for PDA
       );
@@ -778,9 +818,11 @@ describe("zodiac-liquidity", () => {
             .deposit(
               computationOffset,
               Array.from(ciphertext[0]) as number[],
+              Array.from(ciphertext[1]) as number[],
               Array.from(encryptionKeys.publicKey) as number[],
               new anchor.BN(deserializeLE(nonce).toString()),
-              new anchor.BN(depositAmount.toString())
+              new anchor.BN(baseDepositAmount.toString()),
+              new anchor.BN(quoteDepositAmount.toString())
             )
             .accountsPartial({
               depositor: owner.publicKey,
@@ -788,7 +830,10 @@ describe("zodiac-liquidity", () => {
               userPosition: userPositionPda,
               userTokenAccount: userTokenAccount.address,
               vaultTokenAccount: vaultTokenAccount.address,
+              userQuoteTokenAccount: userQuoteTokenAccount.address,
+              vaultQuoteTokenAccount: vaultQuoteTokenAccount.address,
               tokenMint: tokenMint,
+              quoteMint: quoteMint,
               signPdaAccount: signPdaAccount,
               computationAccount: getComputationAccAddress(
                 getArciumEnv().arciumClusterOffset,
@@ -819,19 +864,23 @@ describe("zodiac-liquidity", () => {
 
       // --- Log deposit data ---
       console.log("\n--- Deposit Data ---");
-      console.log("Deposit amount (plaintext):", depositAmount.toString());
+      console.log("Base deposit amount (plaintext):", baseDepositAmount.toString());
+      console.log("Quote deposit amount (plaintext):", quoteDepositAmount.toString());
 
       const vaultAfterDeposit = await program.account.vaultAccount.fetch(vaultPda);
       console.log("Vault state after deposit:");
-      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterDeposit.vaultState[0]).toString("hex"));
-      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterDeposit.vaultState[1]).toString("hex"));
-      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterDeposit.vaultState[2]).toString("hex"));
+      console.log("  vault_state[0] (pending_base):", Buffer.from(vaultAfterDeposit.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (pending_quote):", Buffer.from(vaultAfterDeposit.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_liquidity):", Buffer.from(vaultAfterDeposit.vaultState[2]).toString("hex"));
+      console.log("  vault_state[3] (total_base_deposited):", Buffer.from(vaultAfterDeposit.vaultState[3]).toString("hex"));
+      console.log("  vault_state[4] (total_quote_deposited):", Buffer.from(vaultAfterDeposit.vaultState[4]).toString("hex"));
       console.log("  nonce:", vaultAfterDeposit.nonce.toString());
 
       const posAfterDeposit = await program.account.userPositionAccount.fetch(userPositionPda);
       console.log("User position after deposit:");
-      console.log("  position_state[0] (deposited):", Buffer.from(posAfterDeposit.positionState[0]).toString("hex"));
-      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterDeposit.positionState[1]).toString("hex"));
+      console.log("  position_state[0] (base_deposited):", Buffer.from(posAfterDeposit.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (quote_deposited):", Buffer.from(posAfterDeposit.positionState[1]).toString("hex"));
+      console.log("  position_state[2] (lp_share):", Buffer.from(posAfterDeposit.positionState[2]).toString("hex"));
       console.log("  nonce:", posAfterDeposit.nonce.toString());
       console.log("--- End Deposit Data ---\n");
     });
@@ -892,9 +941,11 @@ describe("zodiac-liquidity", () => {
 
       const vaultAfterReveal = await program.account.vaultAccount.fetch(vaultPda);
       console.log("Vault state after reveal:");
-      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterReveal.vaultState[0]).toString("hex"));
-      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterReveal.vaultState[1]).toString("hex"));
-      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterReveal.vaultState[2]).toString("hex"));
+      console.log("  vault_state[0] (pending_base):", Buffer.from(vaultAfterReveal.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (pending_quote):", Buffer.from(vaultAfterReveal.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_liquidity):", Buffer.from(vaultAfterReveal.vaultState[2]).toString("hex"));
+      console.log("  vault_state[3] (total_base_deposited):", Buffer.from(vaultAfterReveal.vaultState[3]).toString("hex"));
+      console.log("  vault_state[4] (total_quote_deposited):", Buffer.from(vaultAfterReveal.vaultState[4]).toString("hex"));
       console.log("  nonce:", vaultAfterReveal.nonce.toString());
       console.log("--- End Reveal Data ---\n");
     });
@@ -948,9 +999,11 @@ describe("zodiac-liquidity", () => {
       const vaultAfterRecord = await program.account.vaultAccount.fetch(vaultPda);
       console.log("\n--- Record Liquidity Data ---");
       console.log("Vault state after record liquidity:");
-      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterRecord.vaultState[0]).toString("hex"));
-      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterRecord.vaultState[1]).toString("hex"));
-      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterRecord.vaultState[2]).toString("hex"));
+      console.log("  vault_state[0] (pending_base):", Buffer.from(vaultAfterRecord.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (pending_quote):", Buffer.from(vaultAfterRecord.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_liquidity):", Buffer.from(vaultAfterRecord.vaultState[2]).toString("hex"));
+      console.log("  vault_state[3] (total_base_deposited):", Buffer.from(vaultAfterRecord.vaultState[3]).toString("hex"));
+      console.log("  vault_state[4] (total_quote_deposited):", Buffer.from(vaultAfterRecord.vaultState[4]).toString("hex"));
       console.log("  nonce:", vaultAfterRecord.nonce.toString());
       console.log("--- End Record Liquidity Data ---\n");
     });
@@ -1018,15 +1071,18 @@ describe("zodiac-liquidity", () => {
 
       const vaultAfterWithdraw = await program.account.vaultAccount.fetch(vaultPda);
       console.log("Vault state after withdrawal:");
-      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterWithdraw.vaultState[0]).toString("hex"));
-      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterWithdraw.vaultState[1]).toString("hex"));
-      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterWithdraw.vaultState[2]).toString("hex"));
+      console.log("  vault_state[0] (pending_base):", Buffer.from(vaultAfterWithdraw.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (pending_quote):", Buffer.from(vaultAfterWithdraw.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_liquidity):", Buffer.from(vaultAfterWithdraw.vaultState[2]).toString("hex"));
+      console.log("  vault_state[3] (total_base_deposited):", Buffer.from(vaultAfterWithdraw.vaultState[3]).toString("hex"));
+      console.log("  vault_state[4] (total_quote_deposited):", Buffer.from(vaultAfterWithdraw.vaultState[4]).toString("hex"));
       console.log("  nonce:", vaultAfterWithdraw.nonce.toString());
 
       const posAfterWithdraw = await program.account.userPositionAccount.fetch(userPositionPda);
       console.log("User position after withdrawal:");
-      console.log("  position_state[0] (deposited):", Buffer.from(posAfterWithdraw.positionState[0]).toString("hex"));
-      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterWithdraw.positionState[1]).toString("hex"));
+      console.log("  position_state[0] (base_deposited):", Buffer.from(posAfterWithdraw.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (quote_deposited):", Buffer.from(posAfterWithdraw.positionState[1]).toString("hex"));
+      console.log("  position_state[2] (lp_share):", Buffer.from(posAfterWithdraw.positionState[2]).toString("hex"));
       console.log("  nonce:", posAfterWithdraw.nonce.toString());
       console.log("--- End Withdrawal Data ---\n");
     });
@@ -1039,13 +1095,14 @@ describe("zodiac-liquidity", () => {
         program.programId
       )[0];
 
-      const withdrawAmount = new anchor.BN(1_000_000_000); // withdraw full deposit (1 token)
+      const baseWithdrawAmount = new anchor.BN(1_000_000_000); // withdraw full base deposit (1 token)
+      const quoteWithdrawAmount = new anchor.BN(500_000_000); // withdraw full quote deposit (0.5 SOL)
 
       const finalizeSig = await queueWithRetry(
         "clearPosition",
         async (computationOffset) => {
           return program.methods
-            .clearPosition(computationOffset, withdrawAmount)
+            .clearPosition(computationOffset, baseWithdrawAmount, quoteWithdrawAmount)
             .accountsPartial({
               authority: owner.publicKey,
               vault: vaultPda,
@@ -1081,15 +1138,18 @@ describe("zodiac-liquidity", () => {
       const vaultAfterClear = await program.account.vaultAccount.fetch(vaultPda);
       console.log("\n--- Clear Position Data ---");
       console.log("Vault state after clear:");
-      console.log("  vault_state[0] (pending_deposits):", Buffer.from(vaultAfterClear.vaultState[0]).toString("hex"));
-      console.log("  vault_state[1] (total_liquidity):", Buffer.from(vaultAfterClear.vaultState[1]).toString("hex"));
-      console.log("  vault_state[2] (total_deposited):", Buffer.from(vaultAfterClear.vaultState[2]).toString("hex"));
+      console.log("  vault_state[0] (pending_base):", Buffer.from(vaultAfterClear.vaultState[0]).toString("hex"));
+      console.log("  vault_state[1] (pending_quote):", Buffer.from(vaultAfterClear.vaultState[1]).toString("hex"));
+      console.log("  vault_state[2] (total_liquidity):", Buffer.from(vaultAfterClear.vaultState[2]).toString("hex"));
+      console.log("  vault_state[3] (total_base_deposited):", Buffer.from(vaultAfterClear.vaultState[3]).toString("hex"));
+      console.log("  vault_state[4] (total_quote_deposited):", Buffer.from(vaultAfterClear.vaultState[4]).toString("hex"));
       console.log("  nonce:", vaultAfterClear.nonce.toString());
 
       const posAfterClear = await program.account.userPositionAccount.fetch(userPositionPda);
       console.log("User position after clear:");
-      console.log("  position_state[0] (deposited):", Buffer.from(posAfterClear.positionState[0]).toString("hex"));
-      console.log("  position_state[1] (lp_share):", Buffer.from(posAfterClear.positionState[1]).toString("hex"));
+      console.log("  position_state[0] (base_deposited):", Buffer.from(posAfterClear.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (quote_deposited):", Buffer.from(posAfterClear.positionState[1]).toString("hex"));
+      console.log("  position_state[2] (lp_share):", Buffer.from(posAfterClear.positionState[2]).toString("hex"));
       console.log("  nonce:", posAfterClear.nonce.toString());
       console.log("--- End Clear Position Data ---\n");
     });
@@ -1364,7 +1424,7 @@ describe("zodiac-liquidity", () => {
           SystemProgram.transfer({
             fromPubkey: relayer.publicKey,
             toPubkey: relayPda,
-            lamports: 100_000_000, // 0.1 SOL for rent + operations
+            lamports: 2_000_000_000, // 2 SOL for rent + pool creation
           })
         );
         await provider.sendAndConfirm(fundRelayTx, [relayer]);
@@ -1595,7 +1655,7 @@ describe("zodiac-liquidity", () => {
         SystemProgram.transfer({
           fromPubkey: relayer.publicKey,
           toPubkey: relayPda,
-          lamports: 50_000_000,
+          lamports: 2_000_000_000, // 2 SOL for rent + pool creation
         })
       );
       await provider.sendAndConfirm(fundRelayTx, [relayer]);
@@ -1798,7 +1858,7 @@ describe("zodiac-liquidity", () => {
           SystemProgram.transfer({
             fromPubkey: relayer.publicKey,
             toPubkey: relayPda,
-            lamports: 50_000_000,
+            lamports: 2_000_000_000, // 2 SOL for rent + pool/position creation
           })
         );
         await provider.sendAndConfirm(fundRelayTx, [relayer]);
@@ -2158,6 +2218,30 @@ describe("zodiac-liquidity", () => {
   });
 
   after(async () => {
+    // Withdraw SOL from all relay PDAs used in tests (indices 0, 2, 4, 5, 6)
+    const usedRelayIndices = [0, 2, 4, 5, 6];
+    for (const idx of usedRelayIndices) {
+      try {
+        const relayPda = deriveRelayPda(vaultPda, idx, program.programId);
+        const relayBal = await provider.connection.getBalance(relayPda);
+        if (relayBal > 0) {
+          await program.methods
+            .withdrawRelaySol(idx, new anchor.BN(relayBal))
+            .accounts({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              relayPda: relayPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+          console.log(`Withdrew ${relayBal / 1e9} SOL from relay PDA ${idx}`);
+        }
+      } catch (err: any) {
+        console.log(`Could not withdraw relay ${idx} SOL:`, err.message?.substring(0, 80));
+      }
+    }
+
     // Return remaining relayer SOL to owner
     try {
       const relayerBal = await provider.connection.getBalance(relayer.publicKey);

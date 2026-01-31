@@ -370,7 +370,7 @@ async function setupEphemeralWallet(
   provider: anchor.AnchorProvider,
   owner: Keypair,
   vaultPda: PublicKey,
-  fundLamports: number = 50_000_000,
+  fundLamports: number = 500_000_000,
 ): Promise<{ ephemeralKp: Keypair; ephemeralPda: PublicKey }> {
   const ephemeralKp = Keypair.generate();
   const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKp.publicKey, program.programId);
@@ -395,6 +395,9 @@ async function setupEphemeralWallet(
     })
   );
   await provider.sendAndConfirm(fundTx, [owner]);
+
+  // Wait for funding to settle on localnet (prevents "Attempt to debit" errors)
+  await new Promise(resolve => setTimeout(resolve, 1000));
 
   console.log("Ephemeral wallet created:", ephemeralKp.publicKey.toString(), "PDA:", ephemeralPda.toString());
   return { ephemeralKp, ephemeralPda };
@@ -519,6 +522,7 @@ describe("zodiac-liquidity-fail", () => {
   let owner: Keypair;
   let relayer: Keypair;
   let tokenMint: PublicKey;
+  let quoteMint: PublicKey;
   let vaultPda: PublicKey;
   let userPositionPda: PublicKey;
   let mxePublicKey: Uint8Array;
@@ -540,11 +544,11 @@ describe("zodiac-liquidity-fail", () => {
       SystemProgram.transfer({
         fromPubkey: owner.publicKey,
         toPubkey: relayer.publicKey,
-        lamports: 500_000_000, // 0.5 SOL
+        lamports: 5_000_000_000, // 5 SOL
       })
     );
     await provider.sendAndConfirm(fundRelayerTx, [owner]);
-    console.log("Relayer:", relayer.publicKey.toString(), "(funded with 0.5 SOL)");
+    console.log("Relayer:", relayer.publicKey.toString(), "(funded with 5 SOL)");
 
     // Get MXE public key for encryption
     try {
@@ -577,6 +581,9 @@ describe("zodiac-liquidity-fail", () => {
       9 // 9 decimals
     );
     console.log("Token mint:", tokenMint.toString());
+
+    quoteMint = NATIVE_MINT;
+    console.log("Quote mint (WSOL):", quoteMint.toString());
 
     // Derive vault PDA
     [vaultPda] = PublicKey.findProgramAddressSync(
@@ -637,15 +644,19 @@ describe("zodiac-liquidity-fail", () => {
     )[0];
 
     console.log("Creating vault via MPC...");
+    console.log(`  tokenMint = ${tokenMint.toString()}`);
+    console.log(`  quoteMint = ${quoteMint.toString()}`);
+    console.log(`  vaultPda = ${vaultPda.toString()}`);
     await queueWithRetry(
       "createVault",
       async (computationOffset) => {
-        return program.methods
+        const builder = program.methods
           .createVault(computationOffset, new anchor.BN(deserializeLE(nonce).toString()))
           .accountsPartial({
             authority: owner.publicKey,
             vault: vaultPda,
             tokenMint: tokenMint,
+            quoteMint: quoteMint,
             signPdaAccount: signPdaAccount,
             computationAccount: getComputationAccAddress(
               getArciumEnv().arciumClusterOffset,
@@ -663,8 +674,8 @@ describe("zodiac-liquidity-fail", () => {
             clockAccount: getClockAccAddress(),
             systemProgram: SystemProgram.programId,
           })
-          .signers([owner])
-          .rpc({ skipPreflight: true, commitment: "confirmed" });
+          .signers([owner]);
+        return builder.rpc({ commitment: "confirmed" });
       },
       provider,
       program.programId,
@@ -881,7 +892,7 @@ describe("zodiac-liquidity-fail", () => {
           SystemProgram.transfer({
             fromPubkey: relayer.publicKey,
             toPubkey: relayPda,
-            lamports: 50_000_000,
+            lamports: 2_000_000_000, // 2 SOL for pool creation rent
           })
         );
         await provider.sendAndConfirm(fundRelayTx, [relayer]);
@@ -1266,6 +1277,30 @@ describe("zodiac-liquidity-fail", () => {
   });
 
   after(async () => {
+    // Withdraw SOL from relay PDAs used in fail tests (indices 1, 3, 7)
+    const usedRelayIndices = [1, 3, 7];
+    for (const idx of usedRelayIndices) {
+      try {
+        const relayPda = deriveRelayPda(vaultPda, idx, program.programId);
+        const relayBal = await provider.connection.getBalance(relayPda);
+        if (relayBal > 0) {
+          await program.methods
+            .withdrawRelaySol(idx, new anchor.BN(relayBal))
+            .accounts({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              relayPda: relayPda,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+          console.log(`Withdrew ${relayBal / 1e9} SOL from relay PDA ${idx}`);
+        }
+      } catch (err: any) {
+        console.log(`Could not withdraw relay ${idx} SOL:`, err.message?.substring(0, 80));
+      }
+    }
+
     // Return remaining relayer SOL to owner
     try {
       const relayerBal = await provider.connection.getBalance(relayer.publicKey);

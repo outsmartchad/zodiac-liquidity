@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 60/60 passing (40 unit + 20 integration), Devnet 40/40 passing. Ephemeral wallet auth + SOL-paired pools.
+**Phase:** Localnet 41/41 passing (21 unit + 20 integration), Devnet needs fresh deploy (account layouts changed). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery.
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -39,10 +39,15 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Changed:** All Meteora CPI test transactions use `sendWithEphemeralPayer()` — ephemeral keypair is sole signer/fee payer, auth wallet never co-signs
 - **Fixed:** `teardownEphemeralWallet` SOL return now uses ephemeral wallet as fee payer (was failing with `provider.sendAndConfirm`)
 - **Changed:** Fail test Meteora CPI setup uses real ephemeral wallets instead of owner-as-ephemeral shortcut
-- **Added:** `tests/zodiac-integration.ts` — end-to-end integration test wiring MPC outputs into Meteora CPI inputs (20 tests)
+- **Added:** `tests/zodiac-mpc-meteora-integration.ts` — end-to-end integration test wiring MPC outputs into Meteora CPI inputs (20 tests)
 - **Localnet (2026-01-30):** 40/40 unit tests passing (24 happy-path + 16 fail tests)
 - **Localnet (2026-01-31):** 20/20 integration tests passing (full 13-step privacy flow)
 - **Devnet (2026-01-31):** 40/40 passing
+- **Changed (2026-01-31):** Dual-token deposit redesign — users deposit BOTH base (SPL) and quote (SOL/WSOL) tokens privately through Arcium MPC. VaultState expanded 3→5 encrypted u64s, UserPosition 2→3, DepositInput 1→2 fields, new WithdrawAmounts struct. All circuits, instructions, callbacks, events, ArgBuilder offsets, and tests updated.
+- **Added (2026-01-31):** `withdraw_relay_sol` instruction — authority-gated, transfers SOL from relay PDA back to authority via PDA signer seeds. Reclaims rent SOL after Meteora operations complete.
+- **Added (2026-01-31):** `close_relay_token_account` instruction — authority-gated, closes relay PDA's token account (must have zero balance), returns rent to authority.
+- **Changed (2026-01-31):** All three test files now reclaim relay PDA SOL + close token accounts in `after()` hooks. Previously relay PDA SOL was lost on devnet.
+- **Fixed (2026-01-31):** `CreateVault` struct field ordering — `quote_mint` must come AFTER `vault` to avoid PDA seed misread. Anchor's `init_if_needed` + PDA seeds resolution shifts account positions when extra accounts are between the seed source and PDA account.
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -226,7 +231,7 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
  9. [ephemeral]  zodiac.withdraw(pubkey, nonce)      -- Arcium computes share
 10. [ephemeral]  zodiac.withdraw_from_meteora(...)   -- relay removes liquidity
 11. [authority]  zodiac.relay_transfer_to_dest()     -- relay → ephemeral wallet
-12. [authority]  zodiac.clear_position(amount)       -- zero Arcium state
+12. [authority]  zodiac.clear_position(base, quote)   -- zero Arcium state
 13. [authority]  zodiac.close_ephemeral_wallet()     -- close PDA, reclaim rent
 ```
 
@@ -263,18 +268,20 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
 |------------|---------|
 | `create_vault` / `init_vault_callback` | Initialize encrypted vault state |
 | `create_user_position` / `init_user_position_callback` | Initialize encrypted user position |
-| `deposit` / `deposit_callback` | Add encrypted deposit, update vault + position |
+| `deposit` / `deposit_callback` | Add encrypted dual-token deposit (base + quote), update vault + position |
 | `reveal_pending_deposits` / `reveal_pending_deposits_callback` | Reveal aggregate for Meteora deployment |
 | `record_liquidity` / `record_liquidity_callback` | Record liquidity received from Meteora |
 | `withdraw` / `compute_withdrawal_callback` | Compute user's share (encrypted for user) |
 | `clear_position` / `clear_position_callback` | Zero position after withdrawal confirmed |
 | `get_user_position` / `get_user_position_callback` | Let user see their own position |
 
-**Relay Management (2):**
+**Relay Management (4):**
 | Instruction | Purpose |
 |------------|---------|
 | `fund_relay` | Transfer tokens from authority to relay PDA's token account |
 | `relay_transfer_to_destination` | Transfer tokens from relay PDA to destination (e.g., ephemeral wallet) |
+| `withdraw_relay_sol` | Withdraw SOL from relay PDA back to authority (reclaim rent) |
+| `close_relay_token_account` | Close relay PDA's token account, return rent to authority |
 
 **Ephemeral Wallet Management (2):**
 | Instruction | Purpose |
@@ -297,22 +304,25 @@ User requests → Arcium computes share → Relay PDA removes liquidity from Met
 |---------|---------|------|------|
 | `init_vault` | Initialize encrypted vault state | 86KB | 151M |
 | `init_user_position` | Initialize user's encrypted position | 86KB | 151M |
-| `deposit` | Add encrypted deposit, update vault + position | 1.2MB | 578M |
+| `deposit` | Add encrypted dual-token deposit (base + quote), update vault + position | 1.2MB | 578M |
 | `reveal_pending_deposits` | Reveal aggregate for Meteora deployment | 131KB | 153M |
 | `record_liquidity` | Record liquidity received from Meteora | 249KB | 194M |
-| `compute_withdrawal` | Reveal user's deposited amount (encrypted for user) | 785KB | 488M |
+| `compute_withdrawal` | Reveal user's deposited amounts (base + quote, encrypted for user) | 785KB | 488M |
 | `clear_position` | Clear position after withdrawal confirmed | 501KB | 241M |
 | `get_user_position` | Let user see their own position | 844KB | 493M |
 
 ### Encrypted State Layout
 
-**VaultState** (3 encrypted u64s):
-- `pending_deposits` — deposits awaiting Meteora deployment
+**VaultState** (5 encrypted u64s):
+- `pending_base_deposits` — base token deposits awaiting Meteora deployment
+- `pending_quote_deposits` — quote token (WSOL) deposits awaiting Meteora deployment
 - `total_liquidity` — liquidity delta from Meteora add_liquidity
-- `total_deposited` — cumulative deposits for pro-rata calculation
+- `total_base_deposited` — cumulative base deposits for pro-rata calculation
+- `total_quote_deposited` — cumulative quote deposits for pro-rata calculation
 
-**UserPosition** (2 encrypted u64s):
-- `deposited` — user's total deposited amount
+**UserPosition** (3 encrypted u64s):
+- `base_deposited` — user's total base token deposited amount
+- `quote_deposited` — user's total quote token (WSOL) deposited amount
 - `liquidity_share` — user's share of liquidity
 
 **EphemeralWalletAccount** (PDA: `[b"ephemeral", vault, wallet]`):
@@ -355,9 +365,9 @@ The callback server handles MPC outputs that exceed Solana's ~1KB transaction li
 |------|---------|
 | `encrypted-ixs/src/lib.rs` | Arcis MPC circuits |
 | `programs/zodiac_liquidity/src/lib.rs` | Anchor + Arcium program |
-| `tests/zodiac-liquidity.ts` | Happy-path unit tests (24 tests) |
-| `tests/zodiac-liquidity-fail.ts` | Fail/auth unit tests (16 tests) |
-| `tests/zodiac-integration.ts` | End-to-end integration test — full 13-step privacy flow (20 tests) |
+| `tests/zodiac-liquidity.ts` | Happy-path unit tests (14 tests) |
+| `tests/zodiac-liquidity-fail.ts` | Fail/auth unit tests (7 tests) |
+| `tests/zodiac-mpc-meteora-integration.ts` | End-to-end integration test — full 13-step privacy flow (20 tests) |
 | `build/*.arcis` | Compiled circuit files |
 | `build/*.hash` | Circuit hashes (used by `circuit_hash!` macro) |
 | `build/*.idarc` | Circuit input/output descriptors (use to verify ArgBuilder) |
@@ -496,13 +506,18 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 17. **Blockhash retry patch** - On localnet, after heavy MPC activity (8 comp defs + 8 computations), the validator lags and blockhashes expire between fetch and confirmation. The test file patches `provider.sendAndConfirm` to auto-retry up to 3 times on "Blockhash not found" errors with a 2s delay. This covers all `.rpc()` calls since Anchor routes them through `provider.sendAndConfirm`. Eliminated all transient blockhash failures.
 18. **SOL-paired pools** - Meteora DAMM v2 pools should use NATIVE_MINT (WSOL) as one of the token pair. Fund relay WSOL accounts by transferring SOL + `createSyncNativeInstruction()` instead of `mintTo` + `fundRelay`. The on-chain `deposit_to_meteora_damm_v2` has built-in SOL wrapping via `sol_amount` parameter.
 19. **ARX node Docker image version must match Arcium SDK** - See dedicated section below: "ARX Node Version Mismatch (AccountDidNotDeserialize)".
-20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 24 tests), `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 16 tests), and `tests/zodiac-integration.ts` (end-to-end integration, 20 tests). The Anchor.toml script runs all three. To run only one file, temporarily edit the `[scripts] test` line in Anchor.toml to list just one file.
+20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 14 tests), `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 7 tests), and `tests/zodiac-mpc-meteora-integration.ts` (end-to-end integration, 20 tests). Total: 41 tests. Comp def inits + vault/position creation are in `before()` hooks for unit tests (only integration test has them as individual `it()` tests). The Anchor.toml script runs all three. To run only one file, temporarily edit the `[scripts] test` line in Anchor.toml to list just one file.
 21. **Anchor `.rpc()` adds provider wallet as co-signer** - `program.methods.xxx().signers([ephKp]).rpc()` always adds the provider wallet (authority) as a 3rd signer via `provider.wallet.signTransaction()`. To send transactions signed only by ephemeral keypairs, use `.transaction()` + manual `tx.feePayer = ephKp.publicKey` + `connection.sendRawTransaction()`. The `sendWithEphemeralPayer()` helper in both test files handles this with blockhash retry logic. This also applies to `teardownEphemeralWallet` — the SOL return transfer must use the ephemeral wallet as fee payer, not `provider.sendAndConfirm`.
 22. **Anchor events use camelCase names** - `program.coder.events.decode()` returns event names in camelCase (`withdrawEvent`, `pendingDepositsRevealedEvent`), not PascalCase. When matching events from callback tx logs, check both cases or use lowercase comparison.
 23. **Meteora liquidity u128 vs record_liquidity u64** - Meteora's `Position.unlocked_liquidity` is u128 and the SDK's `getLiquidityDelta()` also returns u128-scale values (e.g., `922337203900229981650001879` for a 50M token deposit). The on-chain `record_liquidity` instruction takes `u64`, so values must be capped. This is a known design limitation.
 24. **RescueCipher decrypt nonce format** - `cipher.decrypt(ciphertext: number[][], nonce: Uint8Array)` expects the nonce as a 16-byte `Uint8Array`. Event nonces are `u128` — convert to 16-byte LE: `for (i=0; i<16; i++) buf[i] = Number((nonceBig >> BigInt(i*8)) & 0xffn)`.
 25. **Pool creation consumes relay tokens** - `createCustomizablePoolViaRelay` uses initial liquidity from relay token accounts. After pool+position creation, re-check and top up relay balances before depositing.
 26. **Fail test setup uses real ephemeral wallets** - The Meteora CPI fail test `before()` hook creates a pool and position using registered ephemeral wallets (via `setupEphemeralWallet` + `sendWithEphemeralPayer`), then tears them down. The actual fail test cases then try to use *unregistered* wallets against this pool/position and verify they get `AccountNotInitialized` errors. The setup wallets succeeding is correct — they're registered; only the test wallets should fail.
+27. **Anchor struct field ordering affects PDA derivation** - When an Anchor account struct uses a field as a PDA seed (e.g., `seeds = [b"vault", token_mint.key().as_ref()]`), the seed-referenced field must be deserialized BEFORE the PDA-validated account. In `CreateVault`, placing `quote_mint` between `token_mint` and `vault` caused `vault.key()` to read `NATIVE_MINT` (the quote_mint value). Moving `quote_mint` AFTER `vault` fixed the `ConstraintSeeds (2006)` error. Rule: PDA seed dependencies must come before the PDA account in the struct.
+28. **Nuclear cleanup fixes stale genesis artifacts** - If localnet tests show `ConstraintAddress` errors on `mempool_account` or other Arcium system accounts, stale `artifacts/*.json` genesis files from previous runs may be cached. Fix: `rm -f /app/artifacts/*.json`, stop/rm ARX containers, `docker restart zodiac-dev`, then clean `arcium test`.
+29. **Relay PDA needs sufficient SOL for Meteora pool creation** - The relay PDA is the `payer` in the Meteora CPI for pool creation. A DAMM v2 pool account is ~1112 bytes (~8.5M lamports rent) plus position, NFT, and token vault accounts. Fund the relay PDA with at least 0.5 SOL for pool creation. Insufficient SOL causes `custom program error: 0x1` (InsufficientFunds from SPL Token).
+30. **Relayer SOL budget across test sections** - Multiple Meteora CPI test sections (pool creation, position, deposit/withdraw) each fund their own relay PDA from the relayer wallet. Budget the relayer with enough SOL for ALL sections combined (currently ~7 SOL for 3 sections × 2 SOL relay PDA + 0.1 SOL WSOL each).
+31. **Relay PDA SOL recovery** - After Meteora operations, relay PDAs retain ~2 SOL of rent. Use `withdraw_relay_sol` to reclaim this. Also use `close_relay_token_account` (after draining tokens via `relay_transfer_to_destination`) to reclaim token account rent (~0.002 SOL each). All three test `after()` hooks now do this automatically.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 
@@ -632,116 +647,51 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 ## Test Results (2026-01-31)
 
-### Localnet (24/24 passing — happy-path file only)
+### Localnet (41/41 passing — dual-token redesign)
 
 **Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (localnet, via `anchor keys sync`)
 **ARX nodes:** `arcium/arx-node:v0.6.3` (pinned via `docker tag`)
-
-**File: `tests/zodiac-liquidity.ts` (happy-path)**
-
-| # | Test | Status |
-|---|------|--------|
-| 1 | init_vault comp def | PASS |
-| 2 | init_user_position comp def | PASS |
-| 3 | deposit comp def | PASS |
-| 4 | reveal_pending_deposits comp def | PASS |
-| 5 | record_liquidity comp def | PASS |
-| 6 | compute_withdrawal comp def | PASS |
-| 7 | get_user_position comp def | PASS |
-| 8 | clear_position comp def | PASS |
-| 9 | creates a new vault | PASS |
-| 10 | creates a user position | PASS |
-| 11 | deposits tokens (encrypted) | PASS |
-| 12 | reveals pending deposits | PASS |
-| 13 | records liquidity from Meteora | PASS |
-| 14 | computes withdrawal for user | PASS |
-| 15 | clears user position | PASS |
-| 16 | gets user position | PASS |
-| 17 | transfers tokens from relay PDA to destination | PASS |
-| 18 | funds a relay PDA token account | PASS |
-| 19 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
-| 20 | creates a Meteora position for relay PDA | PASS |
-| 21 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
-| 22 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
-| 23 | registers an ephemeral wallet | PASS |
-| 24 | closes an ephemeral wallet | PASS |
-
-**File: `tests/zodiac-liquidity-fail.ts` (16/16 passing — includes 8 comp def inits + 1 vault creation as setup)**
-
-| # | Test | Status |
-|---|------|--------|
-| 1-8 | comp def inits (setup) | PASS |
-| 9 | creates vault (MPC, setup) | PASS |
-| 10 | fails relay transfer with wrong authority | PASS |
-| 11 | fails relay transfer with invalid relay index | PASS |
-| 12 | fails fund_relay with wrong authority | PASS |
-| 13 | fails create_customizable_pool with unregistered ephemeral wallet | PASS |
-| 14 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
-| 15 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
-| 16 | fails register with wrong authority | PASS |
-
-**Note:** Meteora CPI tests use ephemeral wallet signers (fresh keypair per operation: register PDA → fund → CPI → return funds → close PDA). "Could not return ephemeral SOL" warnings in logs are expected — handled gracefully in teardown.
-
-### Devnet (40/40 passing)
-
-**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (cluster 456)
-**RPC:** Helius devnet
 **Date:** 2026-01-31
 
-**File: `tests/zodiac-liquidity.ts` (24/24 passing)**
+**File: `tests/zodiac-liquidity.ts` (14 tests — comp def inits + vault/position creation in `before()` hook)**
 
 | # | Test | Status |
 |---|------|--------|
-| 1-8 | comp def inits (reused existing) | PASS |
-| 9 | creates a new vault | PASS |
-| 10 | creates a user position | PASS |
-| 11 | deposits tokens (encrypted) | PASS |
-| 12 | reveals pending deposits | PASS |
-| 13 | records liquidity from Meteora | PASS |
-| 14 | computes withdrawal for user | PASS |
-| 15 | clears user position | PASS |
-| 16 | gets user position | PASS |
-| 17 | transfers tokens from relay PDA to destination | PASS |
-| 18 | funds a relay PDA token account | PASS |
-| 19 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
-| 20 | creates a Meteora position for relay PDA | PASS |
-| 21 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
-| 22 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
-| 23 | registers an ephemeral wallet | PASS |
-| 24 | closes an ephemeral wallet | PASS |
+| 1 | deposits tokens with encrypted amount (base + quote) | PASS |
+| 2 | reveals aggregate pending deposits (base + quote) | PASS |
+| 3 | records liquidity received from Meteora | PASS |
+| 4 | computes withdrawal for user (base + quote) | PASS |
+| 5 | clears user position after withdrawal | PASS |
+| 6 | gets user position (base + quote + liquidity) | PASS |
+| 7 | transfers tokens from relay PDA to destination | PASS |
+| 8 | funds a relay PDA token account | PASS |
+| 9 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
+| 10 | creates a Meteora position for relay PDA | PASS |
+| 11 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
+| 12 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
+| 13 | registers an ephemeral wallet | PASS |
+| 14 | closes an ephemeral wallet | PASS |
 
-**File: `tests/zodiac-liquidity-fail.ts` (16/16 passing)**
+**File: `tests/zodiac-liquidity-fail.ts` (7 tests — comp def inits + vault creation + pool setup in `before()` hook)**
 
 | # | Test | Status |
 |---|------|--------|
-| 1-8 | comp def inits (reused existing) | PASS |
-| 9 | creates vault (MPC, setup) | PASS |
-| 10 | fails relay transfer with wrong authority | PASS |
-| 11 | fails relay transfer with invalid relay index | PASS |
-| 12 | fails fund_relay with wrong authority | PASS |
-| 13 | fails create_customizable_pool with unregistered ephemeral wallet | PASS |
-| 14 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
-| 15 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
-| 16 | fails register with wrong authority | PASS |
+| 1 | fails relay transfer with wrong authority | PASS |
+| 2 | fails relay transfer with invalid relay index | PASS |
+| 3 | fails fund_relay with wrong authority | PASS |
+| 4 | fails create_customizable_pool with unregistered ephemeral wallet | PASS |
+| 5 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
+| 6 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
+| 7 | fails register with wrong authority | PASS |
 
-### Localnet Integration Test (20/20 passing)
-
-**File: `tests/zodiac-integration.ts`** — End-to-end test wiring MPC outputs into Meteora CPI inputs. No hardcoded amounts in the MPC → Meteora pipeline.
-**Date:** 2026-01-31
-
-**What it proves:**
-1. `reveal_pending_deposits` → plaintext `total_pending` → used as `fund_relay` amount
-2. Actual Meteora `add_liquidity` returns real `liquidity_delta` → passed to `record_liquidity`
-3. `compute_withdrawal` → encrypted amount → user decrypts with x25519 → used as `withdraw_from_meteora` + `clear_position` amount
-4. `relay_transfer_to_destination` moves tokens from relay to ephemeral wallet
-5. Ephemeral wallet lifecycle (register → CPI → close) works across all Meteora steps
+**File: `tests/zodiac-mpc-meteora-integration.ts` (20 tests — full 13-step privacy flow with dual tokens)**
 
 | # | Test | Status |
 |---|------|--------|
 | 1-8 | comp def inits (8 circuits) | PASS |
 | 9 | creates vault (MPC) | PASS |
 | 10 | creates user position (MPC) | PASS |
-| 11 | deposits encrypted amount (MPC, 50M tokens) | PASS |
+| 11 | deposits encrypted amount (MPC, 50M base + 50M quote) | PASS |
 | 12 | reveals pending deposits and extracts plaintext amount | PASS |
 | 13 | funds relay with revealed amount (wired from step 12) | PASS |
 | 14 | creates pool and position via relay | PASS |
@@ -751,6 +701,21 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 18 | withdraws from Meteora (all unlocked liquidity) | PASS |
 | 19 | transfers tokens from relay to destination (wired from step 17) | PASS |
 | 20 | clears user position (wired from step 17) | PASS |
+
+**Note:** Comp def inits and vault/position creation consolidated into `before()` hooks for unit tests (happy-path + fail). Only the integration test keeps them as individual `it()` tests for visibility.
+
+### Devnet — Needs Fresh Deploy
+
+Account layouts changed in the dual-token redesign (VaultAccount +32 bytes for quote_mint, +64 bytes for expanded vault_state; UserPositionAccount +32 bytes). The existing devnet program is incompatible. Follow the "Fresh Devnet Deploy Procedure" in the Commands section.
+
+### Integration Test Details
+
+**What it proves:**
+1. `reveal_pending_deposits` → plaintext `total_pending_base` + `total_pending_quote` → used as `fund_relay` amounts
+2. Actual Meteora `add_liquidity` returns real `liquidity_delta` → passed to `record_liquidity`
+3. `compute_withdrawal` → encrypted base + quote amounts → user decrypts with x25519 → used as `withdraw_from_meteora` + `clear_position` amounts
+4. `relay_transfer_to_destination` moves both tokens from relay to ephemeral wallet
+5. Ephemeral wallet lifecycle (register → CPI → close) works across all Meteora steps
 
 **Key implementation details:**
 - Event parsing uses `program.coder.events.decode()` on "Program data:" logs from callback txs

@@ -166,8 +166,9 @@ pub mod zodiac_liquidity {
         ctx.accounts.vault.bump = ctx.bumps.vault;
         ctx.accounts.vault.authority = ctx.accounts.authority.key();
         ctx.accounts.vault.token_mint = ctx.accounts.token_mint.key();
+        ctx.accounts.vault.quote_mint = ctx.accounts.quote_mint.key();
         ctx.accounts.vault.nonce = nonce;
-        ctx.accounts.vault.vault_state = [[0; 32]; 3]; // 3 u64s: pending, lp_tokens, total_deposited
+        ctx.accounts.vault.vault_state = [[0; 32]; 5]; // 5 u64s: pending_base, pending_quote, liquidity, total_base, total_quote
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
 
@@ -213,6 +214,7 @@ pub mod zodiac_liquidity {
         emit!(VaultCreatedEvent {
             vault: ctx.accounts.vault.key(),
             token_mint: ctx.accounts.vault.token_mint,
+            quote_mint: ctx.accounts.vault.quote_mint,
         });
 
         Ok(())
@@ -234,7 +236,7 @@ pub mod zodiac_liquidity {
         ctx.accounts.user_position.owner = ctx.accounts.user.key();
         ctx.accounts.user_position.vault = ctx.accounts.vault.key();
         ctx.accounts.user_position.nonce = nonce;
-        ctx.accounts.user_position.position_state = [[0; 32]; 2]; // 2 u64s: deposited, lp_share
+        ctx.accounts.user_position.position_state = [[0; 32]; 3]; // 3 u64s: base_deposited, quote_deposited, lp_share
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
 
@@ -283,19 +285,21 @@ pub mod zodiac_liquidity {
     // DEPOSIT (adds encrypted amount to vault and user position)
     // ============================================================
 
-    /// Deposits tokens into the vault with encrypted amount.
-    /// Transfers tokens from user to vault, then updates encrypted state.
+    /// Deposits tokens into the vault with encrypted amounts.
+    /// Transfers both base and quote tokens from user to vault, then updates encrypted state.
     pub fn deposit(
         ctx: Context<Deposit>,
         computation_offset: u64,
-        encrypted_amount: [u8; 32],      // Encrypted deposit amount
-        encryption_pubkey: [u8; 32],      // User's x25519 public key
-        amount_nonce: u128,               // Nonce for encrypted amount
-        amount: u64,                      // Plaintext amount for token transfer
+        encrypted_base_amount: [u8; 32],   // Encrypted base deposit amount
+        encrypted_quote_amount: [u8; 32],  // Encrypted quote deposit amount
+        encryption_pubkey: [u8; 32],       // User's x25519 public key
+        amount_nonce: u128,                // Nonce for encrypted amounts
+        base_amount: u64,                  // Plaintext base amount for token transfer
+        quote_amount: u64,                 // Plaintext quote amount for token transfer
     ) -> Result<()> {
-        msg!("Processing shielded deposit of {} tokens", amount);
+        msg!("Processing shielded deposit of {} base + {} quote tokens", base_amount, quote_amount);
 
-        // Transfer tokens from user to vault
+        // Transfer base tokens from user to vault
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -305,33 +309,47 @@ pub mod zodiac_liquidity {
                     authority: ctx.accounts.depositor.to_account_info(),
                 },
             ),
-            amount,
+            base_amount,
+        )?;
+
+        // Transfer quote tokens from user to vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.user_quote_token_account.to_account_info(),
+                    to: ctx.accounts.vault_quote_token_account.to_account_info(),
+                    authority: ctx.accounts.depositor.to_account_info(),
+                },
+            ),
+            quote_amount,
         )?;
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
 
         // Build arguments for MPC:
-        // 1. User's encryption pubkey + nonce + encrypted amount (DepositInput)
+        // 1. User's encryption pubkey + nonce + encrypted DepositInput (base_amount, quote_amount)
         // 2. Vault state nonce + account data
         // 3. User position nonce + account data
         let args = ArgBuilder::new()
-            // User input (Enc<Shared, DepositInput>)
+            // User input (Enc<Shared, DepositInput>) - struct has 2 fields
             .x25519_pubkey(encryption_pubkey)
             .plaintext_u128(amount_nonce)
-            .encrypted_u64(encrypted_amount)
+            .encrypted_u64(encrypted_base_amount)
+            .encrypted_u64(encrypted_quote_amount)
             // Vault state (Enc<Mxe, VaultState>)
             .plaintext_u128(ctx.accounts.vault.nonce)
             .account(
                 ctx.accounts.vault.key(),
-                8 + 1 + 32 + 32, // discriminator + bump + authority + token_mint
-                32 * 3,          // 3 encrypted u64s
+                8 + 1 + 32 + 32 + 32, // discriminator + bump + authority + token_mint + quote_mint
+                32 * 5,               // 5 encrypted u64s
             )
             // User position (Enc<Mxe, UserPosition>)
             .plaintext_u128(ctx.accounts.user_position.nonce)
             .account(
                 ctx.accounts.user_position.key(),
                 8 + 1 + 32 + 32, // discriminator + bump + owner + vault
-                32 * 2,          // 2 encrypted u64s
+                32 * 3,          // 3 encrypted u64s
             )
             .build();
 
@@ -415,8 +433,8 @@ pub mod zodiac_liquidity {
             .plaintext_u128(ctx.accounts.vault.nonce)
             .account(
                 ctx.accounts.vault.key(),
-                8 + 1 + 32 + 32,
-                32 * 3,
+                8 + 1 + 32 + 32 + 32, // discriminator + bump + authority + token_mint + quote_mint
+                32 * 5,               // 5 encrypted u64s
             )
             .build();
 
@@ -445,7 +463,8 @@ pub mod zodiac_liquidity {
         ctx: Context<RevealPendingDepositsCallback>,
         output: SignedComputationOutputs<RevealPendingDepositsOutput>,
     ) -> Result<()> {
-        let pending_amount = match output.verify_output(
+        // Output is a tuple (u64, u64) -> field_0 is a struct with field_0 (base) and field_1 (quote)
+        let tuple = match output.verify_output(
             &ctx.accounts.cluster_account,
             &ctx.accounts.computation_account,
         ) {
@@ -455,7 +474,8 @@ pub mod zodiac_liquidity {
 
         emit!(PendingDepositsRevealedEvent {
             vault: ctx.accounts.vault.key(),
-            total_pending: pending_amount,
+            total_pending_base: tuple.field_0,
+            total_pending_quote: tuple.field_1,
         });
 
         Ok(())
@@ -486,8 +506,8 @@ pub mod zodiac_liquidity {
             .plaintext_u128(ctx.accounts.vault.nonce)
             .account(
                 ctx.accounts.vault.key(),
-                8 + 1 + 32 + 32,
-                32 * 3,
+                8 + 1 + 32 + 32 + 32, // discriminator + bump + authority + token_mint + quote_mint
+                32 * 5,               // 5 encrypted u64s
             )
             .build();
 
@@ -550,7 +570,7 @@ pub mod zodiac_liquidity {
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
 
-        // Circuit: compute_withdrawal(user_position: Enc<Mxe, UserPosition>, user_pubkey: Shared) -> Enc<Shared, u64>
+        // Circuit: compute_withdrawal(user_position: Enc<Mxe, UserPosition>, user_pubkey: Shared) -> Enc<Shared, WithdrawAmounts>
         // Shared type requires x25519_pubkey + u128 nonce (per circuit .idarc)
         let args = ArgBuilder::new()
             // User position (Enc<Mxe, UserPosition>)
@@ -558,7 +578,7 @@ pub mod zodiac_liquidity {
             .account(
                 ctx.accounts.user_position.key(),
                 8 + 1 + 32 + 32,
-                32 * 2,
+                32 * 3,          // 3 encrypted u64s
             )
             // User pubkey (Shared) - requires both pubkey and nonce
             .x25519_pubkey(encryption_pubkey)
@@ -596,7 +616,7 @@ pub mod zodiac_liquidity {
         ctx: Context<ComputeWithdrawalCallback>,
         output: SignedComputationOutputs<ComputeWithdrawalOutput>,
     ) -> Result<()> {
-        // New simplified circuit just returns Enc<Shared, u64> (user's deposited amount)
+        // Circuit returns Enc<Shared, WithdrawAmounts> with 2 ciphertexts (base_amount, quote_amount)
         let o = match output.verify_output(
             &ctx.accounts.cluster_account,
             &ctx.accounts.computation_account,
@@ -605,12 +625,13 @@ pub mod zodiac_liquidity {
             Err(_) => return Err(ErrorCode::AbortedComputation.into()),
         };
 
-        // Emit withdrawal amount (encrypted for user)
+        // Emit withdrawal amounts (encrypted for user)
         // State updates happen in separate clear_position call
         emit!(WithdrawEvent {
             vault: ctx.accounts.vault.key(),
             user: ctx.accounts.user_position.owner,
-            encrypted_amount: o.ciphertexts[0],
+            encrypted_base_amount: o.ciphertexts[0],
+            encrypted_quote_amount: o.ciphertexts[1],
             nonce: o.nonce,
         });
 
@@ -638,7 +659,7 @@ pub mod zodiac_liquidity {
             .account(
                 ctx.accounts.user_position.key(),
                 8 + 1 + 32 + 32,
-                32 * 2,
+                32 * 3,          // 3 encrypted u64s
             )
             // User pubkey (Shared) - requires both pubkey and nonce
             .x25519_pubkey(encryption_pubkey)
@@ -676,8 +697,9 @@ pub mod zodiac_liquidity {
         };
 
         emit!(UserPositionEvent {
-            encrypted_deposited: o.ciphertexts[0],
-            encrypted_lp_share: o.ciphertexts[1],
+            encrypted_base_deposited: o.ciphertexts[0],
+            encrypted_quote_deposited: o.ciphertexts[1],
+            encrypted_lp_share: o.ciphertexts[2],
             nonce: o.nonce,
         });
 
@@ -693,14 +715,15 @@ pub mod zodiac_liquidity {
     pub fn clear_position(
         ctx: Context<ClearPosition>,
         computation_offset: u64,
-        withdraw_amount: u64,
+        base_withdraw_amount: u64,
+        quote_withdraw_amount: u64,
     ) -> Result<()> {
         require!(
             ctx.accounts.authority.key() == ctx.accounts.vault.authority,
             ErrorCode::Unauthorized
         );
 
-        msg!("Clearing position with withdraw amount {}", withdraw_amount);
+        msg!("Clearing position with base={} quote={}", base_withdraw_amount, quote_withdraw_amount);
 
         ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
 
@@ -710,16 +733,18 @@ pub mod zodiac_liquidity {
             .account(
                 ctx.accounts.user_position.key(),
                 8 + 1 + 32 + 32, // discriminator + bump + owner + vault
-                32 * 2,          // 2 encrypted u64s
+                32 * 3,          // 3 encrypted u64s
             )
-            // Withdraw amount (plaintext u64)
-            .plaintext_u64(withdraw_amount)
+            // Base withdraw amount (plaintext u64)
+            .plaintext_u64(base_withdraw_amount)
+            // Quote withdraw amount (plaintext u64)
+            .plaintext_u64(quote_withdraw_amount)
             // Vault state (Enc<Mxe, VaultState>)
             .plaintext_u128(ctx.accounts.vault.nonce)
             .account(
                 ctx.accounts.vault.key(),
-                8 + 1 + 32 + 32, // discriminator + bump + authority + token_mint
-                32 * 3,          // 3 encrypted u64s
+                8 + 1 + 32 + 32 + 32, // discriminator + bump + authority + token_mint + quote_mint
+                32 * 5,               // 5 encrypted u64s
             )
             .build();
 
@@ -1239,6 +1264,94 @@ pub mod zodiac_liquidity {
     }
 
     // ============================================================
+    // RELAY SOL WITHDRAWAL + TOKEN ACCOUNT CLOSE
+    // ============================================================
+
+    /// Withdraws SOL from a relay PDA back to the authority.
+    /// Used to reclaim rent SOL after Meteora operations are complete.
+    /// Only callable by vault authority.
+    pub fn withdraw_relay_sol(
+        ctx: Context<WithdrawRelaySol>,
+        relay_index: u8,
+        lamports: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Withdrawing {} lamports from relay PDA {}", lamports, relay_index);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        anchor_lang::system_program::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.system_program.to_account_info(),
+                anchor_lang::system_program::Transfer {
+                    from: ctx.accounts.relay_pda.to_account_info(),
+                    to: ctx.accounts.authority.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            lamports,
+        )?;
+
+        emit!(RelaySolWithdrawnEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            lamports,
+        });
+
+        Ok(())
+    }
+
+    /// Closes a relay PDA's token account, returning rent to the authority.
+    /// Only callable by vault authority. The token account must have zero balance.
+    pub fn close_relay_token_account(
+        ctx: Context<CloseRelayTokenAccount>,
+        relay_index: u8,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Closing relay PDA {} token account", relay_index);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::CloseAccount {
+                    account: ctx.accounts.relay_token_account.to_account_info(),
+                    destination: ctx.accounts.authority.to_account_info(),
+                    authority: ctx.accounts.relay_pda.to_account_info(),
+                },
+                signer_seeds,
+            ),
+        )?;
+
+        Ok(())
+    }
+
+    // ============================================================
     // EPHEMERAL WALLET MANAGEMENT
     // ============================================================
 
@@ -1289,8 +1402,9 @@ pub struct VaultAccount {
     pub bump: u8,
     pub authority: Pubkey,
     pub token_mint: Pubkey,
-    /// Encrypted vault state: [pending_deposits, total_liquidity, total_deposited]
-    pub vault_state: [[u8; 32]; 3],
+    pub quote_mint: Pubkey,
+    /// Encrypted vault state: [pending_base, pending_quote, total_liquidity, total_base_deposited, total_quote_deposited]
+    pub vault_state: [[u8; 32]; 5],
     pub nonce: u128,
 }
 
@@ -1301,8 +1415,8 @@ pub struct UserPositionAccount {
     pub bump: u8,
     pub owner: Pubkey,
     pub vault: Pubkey,
-    /// Encrypted position: [deposited, lp_share]
-    pub position_state: [[u8; 32]; 2],
+    /// Encrypted position: [base_deposited, quote_deposited, lp_share]
+    pub position_state: [[u8; 32]; 3],
     pub nonce: u128,
 }
 
@@ -1496,7 +1610,7 @@ pub struct CreateVault<'info> {
     pub system_program: Program<'info, System>,
     pub arcium_program: Program<'info, Arcium>,
 
-    /// Token mint for this vault
+    /// Base token mint for this vault
     pub token_mint: Account<'info, anchor_spl::token::Mint>,
 
     #[account(
@@ -1507,6 +1621,9 @@ pub struct CreateVault<'info> {
         bump,
     )]
     pub vault: Account<'info, VaultAccount>,
+
+    /// Quote token mint for this vault (typically WSOL)
+    pub quote_mint: Account<'info, anchor_spl::token::Mint>,
 }
 
 #[queue_computation_accounts("init_user_position", user)]
@@ -1626,10 +1743,14 @@ pub struct Deposit<'info> {
     )]
     pub user_position: Box<Account<'info, UserPositionAccount>>,
 
-    /// Token mint for this vault
+    /// Base token mint for this vault
     pub token_mint: Box<Account<'info, anchor_spl::token::Mint>>,
 
-    /// User's token account (source)
+    /// Quote token mint for this vault (typically WSOL)
+    #[account(address = vault.quote_mint)]
+    pub quote_mint: Box<Account<'info, anchor_spl::token::Mint>>,
+
+    /// User's base token account (source)
     #[account(
         mut,
         token::mint = token_mint,
@@ -1637,13 +1758,29 @@ pub struct Deposit<'info> {
     )]
     pub user_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
 
-    /// Vault's token account (destination)
+    /// Vault's base token account (destination)
     #[account(
         mut,
         token::mint = token_mint,
         token::authority = vault,
     )]
     pub vault_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// User's quote token account (source)
+    #[account(
+        mut,
+        token::mint = quote_mint,
+        token::authority = depositor,
+    )]
+    pub user_quote_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// Vault's quote token account (destination)
+    #[account(
+        mut,
+        token::mint = quote_mint,
+        token::authority = vault,
+    )]
+    pub vault_quote_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
 
     pub token_program: Program<'info, anchor_spl::token::Token>,
 }
@@ -2566,6 +2703,62 @@ pub struct RelayTransferToDestination<'info> {
     pub token_program: Program<'info, anchor_spl::token::Token>,
 }
 
+/// Accounts for withdrawing SOL from a relay PDA back to the authority
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct WithdrawRelaySol<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA to withdraw SOL from
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        mut,
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    pub system_program: Program<'info, System>,
+}
+
+/// Accounts for closing a relay PDA's token account
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct CloseRelayTokenAccount<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA that owns the token account
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// Token account to close (must have zero balance)
+    #[account(
+        mut,
+        token::authority = relay_pda,
+    )]
+    pub relay_token_account: Account<'info, anchor_spl::token::TokenAccount>,
+
+    pub token_program: Program<'info, anchor_spl::token::Token>,
+}
+
 
 // ============================================================
 // EPHEMERAL WALLET ACCOUNT CONTEXTS
@@ -2630,6 +2823,7 @@ pub struct CloseEphemeralWallet<'info> {
 pub struct VaultCreatedEvent {
     pub vault: Pubkey,
     pub token_mint: Pubkey,
+    pub quote_mint: Pubkey,
 }
 
 #[event]
@@ -2641,7 +2835,8 @@ pub struct DepositEvent {
 #[event]
 pub struct PendingDepositsRevealedEvent {
     pub vault: Pubkey,
-    pub total_pending: u64,
+    pub total_pending_base: u64,
+    pub total_pending_quote: u64,
 }
 
 #[event]
@@ -2653,13 +2848,15 @@ pub struct LiquidityRecordedEvent {
 pub struct WithdrawEvent {
     pub vault: Pubkey,
     pub user: Pubkey,
-    pub encrypted_amount: [u8; 32],
+    pub encrypted_base_amount: [u8; 32],
+    pub encrypted_quote_amount: [u8; 32],
     pub nonce: u128,
 }
 
 #[event]
 pub struct UserPositionEvent {
-    pub encrypted_deposited: [u8; 32],
+    pub encrypted_base_deposited: [u8; 32],
+    pub encrypted_quote_deposited: [u8; 32],
     pub encrypted_lp_share: [u8; 32],
     pub nonce: u128,
 }
@@ -2718,6 +2915,13 @@ pub struct RelayTransferEvent {
     pub relay_index: u8,
     pub destination: Pubkey,
     pub amount: u64,
+}
+
+#[event]
+pub struct RelaySolWithdrawnEvent {
+    pub vault: Pubkey,
+    pub relay_index: u8,
+    pub lamports: u64,
 }
 
 #[event]

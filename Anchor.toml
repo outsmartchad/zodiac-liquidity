@@ -8,7 +8,7 @@ skip-lint = false
 
 [programs.devnet]
 zodiac_liquidity = "5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu"
-zodiac_mixer = "ZMixer1111111111111111111111111111111111111"
+zodiac_mixer = "H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23"
 
 [programs.localnet]
 zodiac_liquidity = "5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu"
@@ -18,7 +18,7 @@ zodiac_mixer = "H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
