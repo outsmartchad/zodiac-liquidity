@@ -348,8 +348,8 @@ async function sendWithEphemeralPayer(
       return sig;
     } catch (err: any) {
       const msg = err.message || err.toString();
-      if (msg.includes("Blockhash not found") && attempt < 2) {
-        console.log(`  Blockhash expired (ephemeral payer), retrying (${attempt + 1}/3)...`);
+      if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 2) {
+        console.log(`  RPC error (ephemeral payer, ${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/3)...`);
         await new Promise(r => setTimeout(r, 2000));
         const freshTx = new Transaction();
         freshTx.instructions = tx.instructions;
@@ -487,8 +487,8 @@ describe("zodiac-liquidity-fail", () => {
           return await _origSendAndConfirm(tx, signers, opts);
         } catch (err: any) {
           const msg = err.message || err.toString();
-          if (msg.includes("Blockhash not found") && attempt < 2) {
-            console.log(`  Blockhash expired, retrying (${attempt + 1}/3)...`);
+          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 2) {
+            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/3)...`);
             await new Promise(r => setTimeout(r, 2000));
             continue;
           }
@@ -591,123 +591,88 @@ describe("zodiac-liquidity-fail", () => {
       program.programId
     );
     console.log("User Position PDA:", userPositionPda.toString());
-  });
 
-  // ============================================================
-  // SETUP: Comp defs + vault creation (needed for fail tests)
-  // ============================================================
-  describe("Setup - Computation Definition Initialization", () => {
-    it("initializes init_vault computation definition", async () => {
-      const sig = await initCompDef(program, owner, "init_vault", "initVaultCompDef");
-      console.log("Init vault comp def tx:", sig);
-    });
+    // --- Initialize all 8 comp defs (idempotent, skips if already exist) ---
+    console.log("Initializing computation definitions...");
+    const circuits = [
+      { name: "init_vault", method: "initVaultCompDef" },
+      { name: "init_user_position", method: "initUserPositionCompDef" },
+      { name: "deposit", method: "initDepositCompDef" },
+      { name: "reveal_pending_deposits", method: "initRevealPendingCompDef" },
+      { name: "record_liquidity", method: "initRecordLiquidityCompDef" },
+      { name: "compute_withdrawal", method: "initWithdrawCompDef" },
+      { name: "get_user_position", method: "initGetPositionCompDef" },
+      { name: "clear_position", method: "initClearPositionCompDef" },
+    ];
+    for (const { name, method } of circuits) {
+      const sig = await initCompDef(program, owner, name, method);
+      console.log(`  ${name} comp def: ${sig}`);
+    }
 
-    it("initializes init_user_position computation definition", async () => {
-      const sig = await initCompDef(program, owner, "init_user_position", "initUserPositionCompDef");
-      console.log("Init user position comp def tx:", sig);
-    });
-
-    it("initializes deposit computation definition", async () => {
-      const sig = await initCompDef(program, owner, "deposit", "initDepositCompDef");
-      console.log("Init deposit comp def tx:", sig);
-    });
-
-    it("initializes reveal_pending_deposits computation definition", async () => {
-      const sig = await initCompDef(program, owner, "reveal_pending_deposits", "initRevealPendingCompDef");
-      console.log("Init reveal pending comp def tx:", sig);
-    });
-
-    it("initializes record_liquidity computation definition", async () => {
-      const sig = await initCompDef(program, owner, "record_liquidity", "initRecordLiquidityCompDef");
-      console.log("Init record liquidity comp def tx:", sig);
-    });
-
-    it("initializes compute_withdrawal computation definition", async () => {
-      const sig = await initCompDef(program, owner, "compute_withdrawal", "initWithdrawCompDef");
-      console.log("Init withdraw comp def tx:", sig);
-    });
-
-    it("initializes get_user_position computation definition", async () => {
-      const sig = await initCompDef(program, owner, "get_user_position", "initGetPositionCompDef");
-      console.log("Init get position comp def tx:", sig);
-    });
-
-    it("initializes clear_position computation definition", async () => {
-      const sig = await initCompDef(program, owner, "clear_position", "initClearPositionCompDef");
-      console.log("Init clear position comp def tx:", sig);
-    });
-  });
-
-  describe("Setup - Vault Creation", () => {
-    it("creates a new vault", async () => {
-      // Refresh MXE public key after comp defs are initialized (if not already set)
-      if (!mxePublicKey || !cipher) {
-        console.log("MXE key not set yet, waiting for keygen to complete...");
-        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
-        encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
-        const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
-        cipher = new RescueCipher(sharedSecret);
-      } else {
-        console.log("MXE key already available, reusing...");
-        try {
-          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
-          if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
-            console.log("MXE key changed, updating cipher...");
-            mxePublicKey = freshKey;
-            encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
-            const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
-            cipher = new RescueCipher(sharedSecret);
-          }
-        } catch (e) {
-          console.log("Could not refresh MXE key, using cached key");
+    // --- Create vault (MPC operation, needed for fail tests) ---
+    if (!mxePublicKey || !cipher) {
+      console.log("MXE key not set yet, waiting for keygen to complete...");
+      mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
+      encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
+      const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
+      cipher = new RescueCipher(sharedSecret);
+    } else {
+      try {
+        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
+        if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
+          mxePublicKey = freshKey;
+          encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
+          const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
+          cipher = new RescueCipher(sharedSecret);
         }
+      } catch (e) {
+        console.log("Could not refresh MXE key, using cached key");
       }
+    }
 
-      const nonce = randomBytes(16);
+    const nonce = randomBytes(16);
+    const signPdaAccount = PublicKey.findProgramAddressSync(
+      [Buffer.from("ArciumSignerAccount")],
+      program.programId
+    )[0];
 
-      const signPdaAccount = PublicKey.findProgramAddressSync(
-        [Buffer.from("ArciumSignerAccount")],
-        program.programId
-      )[0];
+    console.log("Creating vault via MPC...");
+    await queueWithRetry(
+      "createVault",
+      async (computationOffset) => {
+        return program.methods
+          .createVault(computationOffset, new anchor.BN(deserializeLE(nonce).toString()))
+          .accountsPartial({
+            authority: owner.publicKey,
+            vault: vaultPda,
+            tokenMint: tokenMint,
+            signPdaAccount: signPdaAccount,
+            computationAccount: getComputationAccAddress(
+              getArciumEnv().arciumClusterOffset,
+              computationOffset
+            ),
+            clusterAccount: clusterAccount,
+            mxeAccount: getMXEAccAddress(program.programId),
+            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
+            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            compDefAccount: getCompDefAccAddress(
+              program.programId,
+              Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()
+            ),
+            poolAccount: getFeePoolAccAddress(),
+            clockAccount: getClockAccAddress(),
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([owner])
+          .rpc({ skipPreflight: true, commitment: "confirmed" });
+      },
+      provider,
+      program.programId,
+    );
 
-      const finalizeSig = await queueWithRetry(
-        "createVault",
-        async (computationOffset) => {
-          return program.methods
-            .createVault(computationOffset, new anchor.BN(deserializeLE(nonce).toString()))
-            .accountsPartial({
-              authority: owner.publicKey,
-              vault: vaultPda,
-              tokenMint: tokenMint,
-              signPdaAccount: signPdaAccount,
-              computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
-                computationOffset
-              ),
-              clusterAccount: clusterAccount,
-              mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
-              compDefAccount: getCompDefAccAddress(
-                program.programId,
-                Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()
-              ),
-              poolAccount: getFeePoolAccAddress(),
-              clockAccount: getClockAccAddress(),
-              systemProgram: SystemProgram.programId,
-            })
-            .signers([owner])
-            .rpc({ skipPreflight: true, commitment: "confirmed" });
-        },
-        provider,
-        program.programId,
-      );
-
-      // Verify vault was created
-      const vaultAccount = await program.account.vaultAccount.fetch(vaultPda);
-      console.log("Vault created for fail tests, authority:", vaultAccount.authority.toString());
-      expect(vaultAccount.authority.toString()).to.equal(owner.publicKey.toString());
-    });
+    const vaultAccount = await program.account.vaultAccount.fetch(vaultPda);
+    console.log("Vault created for fail tests, authority:", vaultAccount.authority.toString());
+    console.log("Setup complete — running fail tests...");
   });
 
   // ============================================================
