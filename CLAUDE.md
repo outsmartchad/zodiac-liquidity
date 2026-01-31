@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 24/24 + 16/16 passing (happy-path + fail tests, ephemeral wallet auth + SOL-paired pools). Devnet needs redeploy.
+**Phase:** Localnet 40/40 passing, Devnet 39/40 passing (1 transient RPC 403). Ephemeral wallet auth + SOL-paired pools.
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -36,7 +36,8 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Added:** `EphemeralWalletAccount` PDA + `register_ephemeral_wallet`, `close_ephemeral_wallet` instructions
 - **Changed:** 5 Meteora CPI instructions now use per-operation ephemeral wallet PDA auth instead of authority signer
 - **Changed:** All Meteora pool tests now use SOL-paired pools (SPL token + NATIVE_MINT/WSOL) instead of SPL/SPL pairs
-- **Localnet (2026-01-30):** 31/31 tests passing with ephemeral wallet auth + SOL-paired pools
+- **Localnet (2026-01-30):** 40/40 tests passing (24 happy-path + 16 fail tests)
+- **Devnet (2026-01-30):** 39/40 passing (1 transient Helius RPC 403 rate limit on create_meteora_position)
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -668,11 +669,49 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 **Note:** Meteora CPI tests use ephemeral wallet signers (fresh keypair per operation: register PDA → fund → CPI → return funds → close PDA). "Could not return ephemeral SOL" warnings in logs are expected — handled gracefully in teardown.
 
-### Devnet (needs redeploy)
+### Devnet (39/40 passing — 1 transient RPC 403)
 
 **Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (cluster 456)
+**RPC:** Helius devnet
+**Date:** 2026-01-30
 
-Previous 29/29 tests passed before ephemeral wallet auth + SOL-paired pool changes. Needs `arcium deploy` to update program + re-test.
+**File: `tests/zodiac-liquidity.ts` (happy-path)**
+
+| # | Test | Status |
+|---|------|--------|
+| 1-8 | comp def inits (reused existing) | PASS |
+| 9 | creates a new vault | PASS |
+| 10 | creates a user position | PASS (retry 2/5, timeout on attempt 1) |
+| 11 | deposits tokens (encrypted) | PASS |
+| 12 | reveals pending deposits | PASS |
+| 13 | records liquidity from Meteora | PASS |
+| 14 | computes withdrawal for user | PASS |
+| 15 | clears user position | PASS |
+| 16 | gets user position | PASS |
+| 17 | transfers tokens from relay PDA to destination | PASS |
+| 18 | funds a relay PDA token account | PASS |
+| 19 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
+| 20 | creates a Meteora position for relay PDA | **FAIL** (Helius 403 on getLatestBlockhash) |
+| 21 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
+| 22 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
+| 23 | registers an ephemeral wallet | PASS |
+| 24 | closes an ephemeral wallet | PASS |
+
+**File: `tests/zodiac-liquidity-fail.ts` (16/16 passing)**
+
+| # | Test | Status |
+|---|------|--------|
+| 1-8 | comp def inits (reused existing) | PASS |
+| 9 | creates vault (MPC, setup) | PASS |
+| 10 | fails relay transfer with wrong authority | PASS |
+| 11 | fails relay transfer with invalid relay index | PASS |
+| 12 | fails fund_relay with wrong authority | PASS |
+| 13 | fails create_customizable_pool with unregistered ephemeral wallet | PASS |
+| 14 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
+| 15 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
+| 16 | fails register with wrong authority | PASS |
+
+**Note:** The single failure (test #20) is a transient Helius RPC 403 rate limit during `getLatestBlockhash`, not a code bug. All other Meteora CPI tests (create pool, deposit, withdraw) passed. A re-run would likely pass all 40.
 
 ## Arcium Diagnostic Commands
 
