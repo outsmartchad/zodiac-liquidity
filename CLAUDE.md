@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 40/40 passing, Devnet 39/40 passing (1 transient RPC 403). Ephemeral wallet auth + SOL-paired pools.
+**Phase:** Localnet 40/40 passing, Devnet 40/40 passing. Ephemeral wallet auth + SOL-paired pools.
 
 **Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
 **Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
@@ -37,7 +37,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Changed:** 5 Meteora CPI instructions now use per-operation ephemeral wallet PDA auth instead of authority signer
 - **Changed:** All Meteora pool tests now use SOL-paired pools (SPL token + NATIVE_MINT/WSOL) instead of SPL/SPL pairs
 - **Localnet (2026-01-30):** 40/40 tests passing (24 happy-path + 16 fail tests)
-- **Devnet (2026-01-30):** 39/40 passing (1 transient Helius RPC 403 rate limit on create_meteora_position)
+- **Devnet (2026-01-31):** 40/40 passing
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -669,19 +669,19 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 **Note:** Meteora CPI tests use ephemeral wallet signers (fresh keypair per operation: register PDA → fund → CPI → return funds → close PDA). "Could not return ephemeral SOL" warnings in logs are expected — handled gracefully in teardown.
 
-### Devnet (39/40 passing — 1 transient RPC 403)
+### Devnet (40/40 passing)
 
 **Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (cluster 456)
 **RPC:** Helius devnet
-**Date:** 2026-01-30
+**Date:** 2026-01-31
 
-**File: `tests/zodiac-liquidity.ts` (happy-path)**
+**File: `tests/zodiac-liquidity.ts` (24/24 passing)**
 
 | # | Test | Status |
 |---|------|--------|
 | 1-8 | comp def inits (reused existing) | PASS |
 | 9 | creates a new vault | PASS |
-| 10 | creates a user position | PASS (retry 2/5, timeout on attempt 1) |
+| 10 | creates a user position | PASS |
 | 11 | deposits tokens (encrypted) | PASS |
 | 12 | reveals pending deposits | PASS |
 | 13 | records liquidity from Meteora | PASS |
@@ -691,7 +691,7 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 17 | transfers tokens from relay PDA to destination | PASS |
 | 18 | funds a relay PDA token account | PASS |
 | 19 | creates a customizable pool via relay PDA (SOL-paired) | PASS |
-| 20 | creates a Meteora position for relay PDA | **FAIL** (Helius 403 on getLatestBlockhash) |
+| 20 | creates a Meteora position for relay PDA | PASS |
 | 21 | deposits liquidity to Meteora via relay PDA (SOL-paired) | PASS |
 | 22 | withdraws liquidity from Meteora via relay PDA (SOL-paired) | PASS |
 | 23 | registers an ephemeral wallet | PASS |
@@ -710,8 +710,6 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 14 | fails deposit_to_meteora with unregistered ephemeral wallet | PASS |
 | 15 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
 | 16 | fails register with wrong authority | PASS |
-
-**Note:** The single failure (test #20) is a transient Helius RPC 403 rate limit during `getLatestBlockhash`, not a code bug. All other Meteora CPI tests (create pool, deposit, withdraw) passed. A re-run would likely pass all 40.
 
 ## Arcium Diagnostic Commands
 
