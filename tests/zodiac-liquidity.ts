@@ -67,7 +67,7 @@ const origLog = console.log;
 console.log = (...args: any[]) => {
   const line = args.map((a) => (typeof a === "object" ? JSON.stringify(a, null, 2) : String(a))).join(" ");
   origLog(...args);
-  logStream.write(line + "\n");
+  try { logStream.write(line + "\n"); } catch {}
 };
 
 /**
@@ -107,12 +107,16 @@ async function queueWithRetry(
       );
 
       // Race: finalization vs timeout with mempool check
+      // Use cancelled flag to prevent dangling timeout promises from causing
+      // unhandled rejections when multiple test files run in one mocha process.
       const MEMPOOL_CHECK_TIMEOUT_MS = 90_000; // 90s (mempool TTL = 180 slots ≈ 72s)
+      let timeoutCancelled = false;
       const finalizeSig = await Promise.race([
-        finalizationPromise,
+        finalizationPromise.then((sig) => { timeoutCancelled = true; return sig; }),
         (async () => {
           // Wait, then check if computation is still queued or was dropped
           await new Promise((r) => setTimeout(r, 15_000)); // 15s grace period
+          if (timeoutCancelled) return "CANCELLED" as any;
           const compAccAddress = getComputationAccAddress(clusterOffset, computationOffset);
           const compAccInfo = await withRetry(() => provider.connection.getAccountInfo(compAccAddress));
           if (!compAccInfo) {
@@ -137,6 +141,7 @@ async function queueWithRetry(
           }
           // Keep waiting for finalization up to the timeout
           await new Promise((r) => setTimeout(r, MEMPOOL_CHECK_TIMEOUT_MS - 15_000));
+          if (timeoutCancelled) return "CANCELLED" as any;
           throw new Error(`TIMEOUT_WAITING_FOR_FINALIZATION`);
         })(),
       ]);
@@ -442,25 +447,28 @@ describe("zodiac-liquidity", () => {
   // Patch provider.sendAndConfirm to auto-retry on "Blockhash not found".
   // On localnet, after heavy MPC activity the validator can lag behind,
   // causing blockhash expiry between fetch and confirmation.
-  // Anchor's sendAndConfirm already fetches a fresh blockhash each call,
-  // so retrying the full call fixes transient timing issues.
-  const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
-  provider.sendAndConfirm = async function(tx, signers?, opts?) {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        return await _origSendAndConfirm(tx, signers, opts);
-      } catch (err: any) {
-        const msg = err.message || err.toString();
-        if (msg.includes("Blockhash not found") && attempt < 2) {
-          console.log(`  Blockhash expired, retrying (${attempt + 1}/3)...`);
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
+  // Flag prevents double-patching when multiple test files run in one mocha process.
+  if (!(provider.sendAndConfirm as any).__blockhashRetryPatched) {
+    const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
+    const patchedFn = async function(tx: any, signers?: any, opts?: any) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          return await _origSendAndConfirm(tx, signers, opts);
+        } catch (err: any) {
+          const msg = err.message || err.toString();
+          if (msg.includes("Blockhash not found") && attempt < 2) {
+            console.log(`  Blockhash expired, retrying (${attempt + 1}/3)...`);
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          throw err;
         }
-        throw err;
       }
-    }
-    throw new Error("sendAndConfirm retry: unreachable");
-  } as any;
+      throw new Error("sendAndConfirm retry: unreachable");
+    } as any;
+    patchedFn.__blockhashRetryPatched = true;
+    provider.sendAndConfirm = patchedFn;
+  }
 
   type Event = anchor.IdlEvents<(typeof program)["idl"]>;
   const awaitEvent = async <E extends keyof Event>(
@@ -2153,7 +2161,6 @@ describe("zodiac-liquidity", () => {
     console.log("=".repeat(60));
     console.log("All tests complete. Log saved to:", LOG_FILE);
     console.log("=".repeat(60));
-    logStream.end();
   });
 
   // Helper function to initialize computation definitions (idempotent)
