@@ -11,3 +11,4 @@ build/
 .env
 *.pem
 artifacts/arx_node_logs/
+logs/
