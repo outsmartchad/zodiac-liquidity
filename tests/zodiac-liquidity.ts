@@ -1,7 +1,7 @@
 import "dotenv/config";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import { ZodiacLiquidity } from "../target/types/zodiac_liquidity";
 import { randomBytes, createHash } from "crypto";
 import nacl from "tweetnacl";
@@ -276,6 +276,45 @@ async function withBlockhashRetry<T>(fn: () => Promise<T>, retries = 3, delayMs 
 }
 
 /**
+ * Send a transaction with only the provided keypairs as signers (no provider wallet).
+ * This prevents the Anchor provider wallet from being added as a co-signer via .rpc().
+ * Includes blockhash retry logic (3 attempts) matching the existing sendAndConfirm patch.
+ */
+async function sendWithEphemeralPayer(
+  provider: anchor.AnchorProvider,
+  tx: Transaction,
+  signers: Keypair[],
+): Promise<string> {
+  const connection = provider.connection;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.lastValidBlockHeight = lastValidBlockHeight;
+      tx.feePayer = signers[0].publicKey;
+      tx.sign(...signers);
+      const rawTx = tx.serialize();
+      const sig = await connection.sendRawTransaction(rawTx, { skipPreflight: false, preflightCommitment: "confirmed" });
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    } catch (err: any) {
+      const msg = err.message || err.toString();
+      if (msg.includes("Blockhash not found") && attempt < 2) {
+        console.log(`  Blockhash expired (ephemeral payer), retrying (${attempt + 1}/3)...`);
+        await new Promise(r => setTimeout(r, 2000));
+        // Need a fresh transaction object since the old one has stale signatures
+        const freshTx = new Transaction();
+        freshTx.instructions = tx.instructions;
+        tx = freshTx;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("sendWithEphemeralPayer: unreachable");
+}
+
+/**
  * Calculate liquidity from desired token amounts using Meteora SDK.
  */
 function calculateLiquidityFromAmounts(
@@ -409,18 +448,18 @@ async function teardownEphemeralWallet(
   ephemeralKp: Keypair,
   ephemeralPda: PublicKey,
 ): Promise<void> {
-  // Return remaining SOL to authority
+  // Return remaining SOL to authority (ephemeral wallet pays its own fee)
   try {
     const ephBal = await provider.connection.getBalance(ephemeralKp.publicKey);
     if (ephBal > 5000) {
-      const returnTx = new anchor.web3.Transaction().add(
+      const returnTx = new Transaction().add(
         SystemProgram.transfer({
           fromPubkey: ephemeralKp.publicKey,
           toPubkey: owner.publicKey,
           lamports: ephBal - 5000,
         })
       );
-      await provider.sendAndConfirm(returnTx, [ephemeralKp]);
+      await sendWithEphemeralPayer(provider, returnTx, [ephemeralKp]);
       console.log("Returned", (ephBal - 5000) / 1e9, "SOL from ephemeral wallet to authority");
     }
   } catch (err: any) {
@@ -1528,7 +1567,7 @@ describe("zodiac-liquidity", () => {
 
       try {
         // Ephemeral wallet signs the CPI (not authority)
-        const sig = await program.methods
+        const poolTx = await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex,
             poolFees,
@@ -1564,8 +1603,9 @@ describe("zodiac-liquidity", () => {
             eventAuthority: eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([ephemeralKp, positionNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+
+        const sig = await sendWithEphemeralPayer(provider, poolTx, [ephemeralKp, positionNftMint]);
 
         console.log("[SIGNER] createCustomizablePoolViaRelay => ephemeralKp:", ephemeralKp.publicKey.toString());
         console.log("[SIGNER] createCustomizablePoolViaRelay => positionNftMint:", positionNftMint.publicKey.toString());
@@ -1682,8 +1722,8 @@ describe("zodiac-liquidity", () => {
         // --- Ephemeral wallet for pool creation ---
         const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
 
-        // Create pool first (ephemeral wallet signs)
-        await program.methods
+        // Create pool first (ephemeral wallet signs, no provider wallet)
+        const poolCreateTx = await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
@@ -1700,8 +1740,8 @@ describe("zodiac-liquidity", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([poolEph.ephemeralKp, poolNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        await sendWithEphemeralPayer(provider, poolCreateTx, [poolEph.ephemeralKp, poolNftMint]);
 
         console.log("[SIGNER] createCustomizablePoolViaRelay (position test setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
         console.log("Pool created for position test");
@@ -1733,7 +1773,7 @@ describe("zodiac-liquidity", () => {
           program.programId
         );
 
-        const sig = await program.methods
+        const posTx = await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
             payer: posEph.ephemeralKp.publicKey,
@@ -1751,8 +1791,8 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([posEph.ephemeralKp, posNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        const sig = await sendWithEphemeralPayer(provider, posTx, [posEph.ephemeralKp, posNftMint]);
 
         console.log("[SIGNER] createMeteoraPosition => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
         console.log("[SIGNER] createMeteoraPosition => posNftMint:", posNftMint.publicKey.toString());
@@ -1888,7 +1928,7 @@ describe("zodiac-liquidity", () => {
         };
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
-        await program.methods
+        const depWdPoolTx = await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
@@ -1905,8 +1945,8 @@ describe("zodiac-liquidity", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([poolEph.ephemeralKp, poolNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        await sendWithEphemeralPayer(provider, depWdPoolTx, [poolEph.ephemeralKp, poolNftMint]);
 
         console.log("[SIGNER] createCustomizablePoolViaRelay (dep/wd setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
         console.log("Pool created for deposit/withdraw test at:", poolPda.toString());
@@ -1933,7 +1973,7 @@ describe("zodiac-liquidity", () => {
           program.programId
         );
 
-        await program.methods
+        const depWdPosTx = await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
             payer: posEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: posEph.ephemeralPda, relayPda,
@@ -1944,8 +1984,8 @@ describe("zodiac-liquidity", () => {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([posEph.ephemeralKp, posNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        await sendWithEphemeralPayer(provider, depWdPosTx, [posEph.ephemeralKp, posNftMint]);
 
         console.log("[SIGNER] createMeteoraPosition (dep/wd setup) => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
         console.log("Position created for deposit/withdraw test");
@@ -1986,7 +2026,7 @@ describe("zodiac-liquidity", () => {
         );
         console.log("Calculated liquidity delta for deposit:", liquidityDelta.toString());
 
-        const sig = await program.methods
+        const depTx = await program.methods
           .depositToMeteoraDammV2(
             relayIndex,
             liquidityDelta,                        // SDK-computed liquidity_delta
@@ -2014,8 +2054,8 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([depEph.ephemeralKp])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        const sig = await sendWithEphemeralPayer(provider, depTx, [depEph.ephemeralKp]);
 
         console.log("[SIGNER] depositToMeteoraDammV2 => ephemeralKp:", depEph.ephemeralKp.publicKey.toString());
         console.log("Deposit to Meteora tx:", sig);
@@ -2053,8 +2093,8 @@ describe("zodiac-liquidity", () => {
         const unlockedLiquidity = new anchor.BN(unlockedLiquidityBytes, "le");
         console.log("Position unlocked_liquidity:", unlockedLiquidity.toString());
 
-        // Withdraw all unlocked liquidity (ephemeral wallet signs)
-        const sig = await program.methods
+        // Withdraw all unlocked liquidity (ephemeral wallet signs, no provider wallet)
+        const wdTx = await program.methods
           .withdrawFromMeteoraDammV2(
             relayIndex,
             unlockedLiquidity,           // liquidity_delta (withdraw all)
@@ -2081,8 +2121,8 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([wdEph.ephemeralKp])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        const sig = await sendWithEphemeralPayer(provider, wdTx, [wdEph.ephemeralKp]);
 
         console.log("[SIGNER] withdrawFromMeteoraDammV2 => ephemeralKp:", wdEph.ephemeralKp.publicKey.toString());
         console.log("Withdraw from Meteora tx:", sig);

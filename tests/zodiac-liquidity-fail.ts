@@ -1,7 +1,7 @@
 import "dotenv/config";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, Keypair, SystemProgram } from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import { ZodiacLiquidity } from "../target/types/zodiac_liquidity";
 import { randomBytes, createHash } from "crypto";
 import nacl from "tweetnacl";
@@ -324,6 +324,121 @@ function deriveEphemeralWalletPda(
     programId
   );
   return pda;
+}
+
+/**
+ * Send a transaction with only the provided keypairs as signers (no provider wallet).
+ */
+async function sendWithEphemeralPayer(
+  provider: anchor.AnchorProvider,
+  tx: Transaction,
+  signers: Keypair[],
+): Promise<string> {
+  const connection = provider.connection;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
+      tx.recentBlockhash = blockhash;
+      tx.lastValidBlockHeight = lastValidBlockHeight;
+      tx.feePayer = signers[0].publicKey;
+      tx.sign(...signers);
+      const rawTx = tx.serialize();
+      const sig = await connection.sendRawTransaction(rawTx, { skipPreflight: false, preflightCommitment: "confirmed" });
+      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
+      return sig;
+    } catch (err: any) {
+      const msg = err.message || err.toString();
+      if (msg.includes("Blockhash not found") && attempt < 2) {
+        console.log(`  Blockhash expired (ephemeral payer), retrying (${attempt + 1}/3)...`);
+        await new Promise(r => setTimeout(r, 2000));
+        const freshTx = new Transaction();
+        freshTx.instructions = tx.instructions;
+        tx = freshTx;
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error("sendWithEphemeralPayer: unreachable");
+}
+
+/**
+ * Creates a fresh ephemeral wallet, registers its PDA, funds it with SOL for tx fees.
+ */
+async function setupEphemeralWallet(
+  program: Program<ZodiacLiquidity>,
+  provider: anchor.AnchorProvider,
+  owner: Keypair,
+  vaultPda: PublicKey,
+  fundLamports: number = 50_000_000,
+): Promise<{ ephemeralKp: Keypair; ephemeralPda: PublicKey }> {
+  const ephemeralKp = Keypair.generate();
+  const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKp.publicKey, program.programId);
+
+  await program.methods
+    .registerEphemeralWallet()
+    .accounts({
+      authority: owner.publicKey,
+      vault: vaultPda,
+      wallet: ephemeralKp.publicKey,
+      ephemeralWallet: ephemeralPda,
+      systemProgram: SystemProgram.programId,
+    })
+    .signers([owner])
+    .rpc({ commitment: "confirmed" });
+
+  const fundTx = new anchor.web3.Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: owner.publicKey,
+      toPubkey: ephemeralKp.publicKey,
+      lamports: fundLamports,
+    })
+  );
+  await provider.sendAndConfirm(fundTx, [owner]);
+
+  console.log("Ephemeral wallet created:", ephemeralKp.publicKey.toString(), "PDA:", ephemeralPda.toString());
+  return { ephemeralKp, ephemeralPda };
+}
+
+/**
+ * Returns remaining SOL from ephemeral wallet to authority, then closes the PDA.
+ */
+async function teardownEphemeralWallet(
+  program: Program<ZodiacLiquidity>,
+  provider: anchor.AnchorProvider,
+  owner: Keypair,
+  vaultPda: PublicKey,
+  ephemeralKp: Keypair,
+  ephemeralPda: PublicKey,
+): Promise<void> {
+  try {
+    const ephBal = await provider.connection.getBalance(ephemeralKp.publicKey);
+    if (ephBal > 5000) {
+      const returnTx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: ephemeralKp.publicKey,
+          toPubkey: owner.publicKey,
+          lamports: ephBal - 5000,
+        })
+      );
+      await sendWithEphemeralPayer(provider, returnTx, [ephemeralKp]);
+      console.log("Returned", (ephBal - 5000) / 1e9, "SOL from ephemeral wallet to authority");
+    }
+  } catch (err: any) {
+    console.log("Could not return ephemeral SOL:", err.message?.substring(0, 80));
+  }
+
+  await program.methods
+    .closeEphemeralWallet()
+    .accounts({
+      authority: owner.publicKey,
+      vault: vaultPda,
+      ephemeralWallet: ephemeralPda,
+    })
+    .signers([owner])
+    .rpc({ commitment: "confirmed" });
+
+  console.log("Ephemeral wallet PDA closed:", ephemeralPda.toString());
 }
 
 async function getMXEPublicKeyWithRetry(
@@ -786,7 +901,6 @@ describe("zodiac-liquidity-fail", () => {
     let tokenAVault: PublicKey;
     let tokenBVault: PublicKey;
     let eventAuthority: PublicKey;
-    let depWithEphemeralPda: PublicKey;
     const relayIndex = 7; // Use different relay index from happy path tests
     let setupFailed = false;
 
@@ -794,30 +908,6 @@ describe("zodiac-liquidity-fail", () => {
       try {
         // Delay to avoid RPC rate limiting from previous tests
         await new Promise(resolve => setTimeout(resolve, 3000));
-
-        // Register owner as ephemeral wallet for this vault
-        depWithEphemeralPda = deriveEphemeralWalletPda(vaultPda, owner.publicKey, program.programId);
-        try {
-          await program.methods
-            .registerEphemeralWallet()
-            .accounts({
-              authority: owner.publicKey,
-              vault: vaultPda,
-              wallet: owner.publicKey,
-              ephemeralWallet: depWithEphemeralPda,
-              systemProgram: SystemProgram.programId,
-            })
-            .signers([owner])
-            .rpc({ commitment: "confirmed" });
-          console.log("Registered owner as ephemeral wallet:", depWithEphemeralPda.toString());
-        } catch (err: any) {
-          // May already exist from previous test run
-          if (err.message?.includes("already in use")) {
-            console.log("Ephemeral wallet PDA already exists, continuing");
-          } else {
-            throw err;
-          }
-        }
 
         relayPda = deriveRelayPda(vaultPda, relayIndex, program.programId);
 
@@ -898,14 +988,17 @@ describe("zodiac-liquidity-fail", () => {
         };
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
-        await program.methods
+        // --- Ephemeral wallet for pool creation ---
+        const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
+
+        const poolCreateTx = await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            payer: owner.publicKey, vault: vaultPda, ephemeralWallet: depWithEphemeralPda, relayPda,
+            payer: poolEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: poolEph.ephemeralPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tokenA, tokenBMint: tokenB,
@@ -915,14 +1008,17 @@ describe("zodiac-liquidity-fail", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([owner, poolNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        await sendWithEphemeralPayer(provider, poolCreateTx, [poolEph.ephemeralKp, poolNftMint]);
 
         console.log("Pool created for fail tests at:", poolPda.toString());
+        await teardownEphemeralWallet(program, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
 
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Create a separate position for deposit/withdraw fail testing
+        // --- Ephemeral wallet for position creation ---
+        const posEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
+
         posNftMint = Keypair.generate();
         [positionPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
@@ -938,10 +1034,10 @@ describe("zodiac-liquidity-fail", () => {
           program.programId
         );
 
-        await program.methods
+        const posCreateTx = await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            payer: owner.publicKey, vault: vaultPda, ephemeralWallet: depWithEphemeralPda, relayPda,
+            payer: posEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: posEph.ephemeralPda, relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
             pool: poolPda, position: positionPda,
@@ -949,10 +1045,11 @@ describe("zodiac-liquidity-fail", () => {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([owner, posNftMint])
-          .rpc({ commitment: "confirmed" });
+          .transaction();
+        await sendWithEphemeralPayer(provider, posCreateTx, [posEph.ephemeralKp, posNftMint]);
 
         console.log("Position created for fail tests");
+        await teardownEphemeralWallet(program, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
       } catch (err: any) {
         console.log("Meteora CPI fail test setup failed:", err.message?.substring(0, 150));
         setupFailed = true;
