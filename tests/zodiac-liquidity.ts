@@ -393,6 +393,8 @@ async function setupEphemeralWallet(
   await provider.sendAndConfirm(fundTx, [owner]);
 
   console.log("Ephemeral wallet created:", ephemeralKp.publicKey.toString(), "PDA:", ephemeralPda.toString());
+  console.log("  [SIGNER] registerEphemeralWallet => authority (owner):", owner.publicKey.toString());
+  console.log("  [SIGNER] fundEphemeralWallet (SOL transfer) => owner:", owner.publicKey.toString());
   return { ephemeralKp, ephemeralPda };
 }
 
@@ -437,6 +439,7 @@ async function teardownEphemeralWallet(
     .rpc({ commitment: "confirmed" });
 
   console.log("Ephemeral wallet PDA closed:", ephemeralPda.toString());
+  console.log("  [SIGNER] closeEphemeralWallet => authority (owner):", owner.publicKey.toString());
 }
 
 describe("zodiac-liquidity", () => {
@@ -668,6 +671,7 @@ describe("zodiac-liquidity", () => {
         provider,
         program.programId,
       );
+      console.log("[SIGNER] createVault => owner:", owner.publicKey.toString());
 
       // Verify vault was created
       const vaultAccount = await program.account.vaultAccount.fetch(vaultPda);
@@ -725,6 +729,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] createUserPosition => owner:", owner.publicKey.toString());
       console.log("User position created, finalize tx:", finalizeSig);
 
       const posAccount = await program.account.userPositionAccount.fetch(userPositionPda);
@@ -823,6 +828,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] deposit => owner:", owner.publicKey.toString());
       console.log("Deposit succeeded, finalize tx:", finalizeSig);
 
       // --- Log deposit data ---
@@ -883,6 +889,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] revealPendingDeposits => owner:", owner.publicKey.toString());
       console.log("Reveal succeeded, finalize tx:", finalizeSig);
 
       // --- Log reveal data ---
@@ -948,6 +955,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] recordLiquidity => owner:", owner.publicKey.toString());
       console.log("Record liquidity succeeded, finalize tx:", finalizeSig);
 
       // Verify vault state updated
@@ -1008,6 +1016,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] computeWithdrawal => owner:", owner.publicKey.toString());
       console.log("Withdrawal computation succeeded, finalize tx:", finalizeSig);
 
       // --- Log withdrawal data ---
@@ -1079,6 +1088,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] clearPosition => owner:", owner.publicKey.toString());
       console.log("Clear position succeeded, finalize tx:", finalizeSig);
 
       // Verify both vault and user position updated
@@ -1146,6 +1156,7 @@ describe("zodiac-liquidity", () => {
         program.programId,
       );
 
+      console.log("[SIGNER] getUserPosition => owner:", owner.publicKey.toString());
       console.log("Get user position succeeded, finalize tx:", finalizeSig);
 
       // --- Log position data ---
@@ -1230,6 +1241,7 @@ describe("zodiac-liquidity", () => {
         .signers([owner])
         .rpc({ commitment: "confirmed" });
 
+      console.log("[SIGNER] fundRelay => owner:", owner.publicKey.toString());
       console.log("Funded relay with", transferAmount, "tokens");
 
       // Verify relay has tokens
@@ -1254,6 +1266,7 @@ describe("zodiac-liquidity", () => {
         .signers([owner])
         .rpc({ commitment: "confirmed" });
 
+      console.log("[SIGNER] relayTransferToDestination => owner:", owner.publicKey.toString());
       console.log("Relay transfer tx:", sig);
 
       // Wait before balance reads to avoid rate limiting
@@ -1324,6 +1337,7 @@ describe("zodiac-liquidity", () => {
         .signers([owner])
         .rpc({ commitment: "confirmed" });
 
+      console.log("[SIGNER] fundRelay => owner:", owner.publicKey.toString());
       console.log("Fund relay tx:", sig);
 
       const relayAccount = await withRetry(() => getAccount(provider.connection, relayTokenAccount));
@@ -1553,6 +1567,8 @@ describe("zodiac-liquidity", () => {
           .signers([ephemeralKp, positionNftMint])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] createCustomizablePoolViaRelay => ephemeralKp:", ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createCustomizablePoolViaRelay => positionNftMint:", positionNftMint.publicKey.toString());
         console.log("Create customizable pool tx:", sig);
 
         // Verify pool was created by checking the account exists
@@ -1617,6 +1633,7 @@ describe("zodiac-liquidity", () => {
       await program.methods.fundRelay(relayIndex, new anchor.BN(100_000_000))
         .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenA.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
         .signers([owner]).rpc({ commitment: "confirmed" });
+      console.log("[SIGNER] fundRelay (position test setup) => owner:", owner.publicKey.toString());
 
       // Fund relay WSOL account with SOL + sync native (relayer funds SOL)
       const relayTokenWsol = tA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
@@ -1625,6 +1642,7 @@ describe("zodiac-liquidity", () => {
         createSyncNativeInstruction(relayTokenWsol),
       );
       await provider.sendAndConfirm(fundWsolTx, [relayer]);
+      console.log("[SIGNER] fundRelayWSOL (SOL transfer) => relayer:", relayer.publicKey.toString());
 
       // First create a pool via relay using customizable (no config needed)
       const poolNftMint = Keypair.generate();
@@ -1685,6 +1703,7 @@ describe("zodiac-liquidity", () => {
           .signers([poolEph.ephemeralKp, poolNftMint])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] createCustomizablePoolViaRelay (position test setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
         console.log("Pool created for position test");
 
         // Close pool creation ephemeral wallet
@@ -1735,6 +1754,8 @@ describe("zodiac-liquidity", () => {
           .signers([posEph.ephemeralKp, posNftMint])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] createMeteoraPosition => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createMeteoraPosition => posNftMint:", posNftMint.publicKey.toString());
         console.log("Create Meteora position tx:", sig);
 
         // Verify position tracker was created
@@ -1820,6 +1841,7 @@ describe("zodiac-liquidity", () => {
         await program.methods.fundRelay(relayIndex, new anchor.BN(100_000_000))
           .accounts({ authority: owner.publicKey, vault: vaultPda, relayPda, authorityTokenAccount: authTokenSpl.address, relayTokenAccount: relayTokenSpl, tokenProgram: TOKEN_PROGRAM_ID })
           .signers([owner]).rpc({ commitment: "confirmed" });
+        console.log("[SIGNER] fundRelay (dep/wd setup) => owner:", owner.publicKey.toString());
 
         // Fund relay WSOL account with SOL + sync native (relayer funds SOL)
         const relayTokenWsol = tokenA.equals(NATIVE_MINT) ? relayTokenA : relayTokenB;
@@ -1828,6 +1850,7 @@ describe("zodiac-liquidity", () => {
           createSyncNativeInstruction(relayTokenWsol),
         );
         await provider.sendAndConfirm(fundWsolTx, [relayer]);
+        console.log("[SIGNER] fundRelayWSOL (dep/wd setup, SOL transfer) => relayer:", relayer.publicKey.toString());
 
         // --- Ephemeral wallet for pool creation ---
         const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
@@ -1885,6 +1908,7 @@ describe("zodiac-liquidity", () => {
           .signers([poolEph.ephemeralKp, poolNftMint])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] createCustomizablePoolViaRelay (dep/wd setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
         console.log("Pool created for deposit/withdraw test at:", poolPda.toString());
         await teardownEphemeralWallet(program, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
 
@@ -1923,6 +1947,7 @@ describe("zodiac-liquidity", () => {
           .signers([posEph.ephemeralKp, posNftMint])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] createMeteoraPosition (dep/wd setup) => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
         console.log("Position created for deposit/withdraw test");
         await teardownEphemeralWallet(program, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
       } catch (err: any) {
@@ -1992,6 +2017,7 @@ describe("zodiac-liquidity", () => {
           .signers([depEph.ephemeralKp])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] depositToMeteoraDammV2 => ephemeralKp:", depEph.ephemeralKp.publicKey.toString());
         console.log("Deposit to Meteora tx:", sig);
 
         // Verify position has liquidity by checking the account exists
@@ -2058,6 +2084,7 @@ describe("zodiac-liquidity", () => {
           .signers([wdEph.ephemeralKp])
           .rpc({ commitment: "confirmed" });
 
+        console.log("[SIGNER] withdrawFromMeteoraDammV2 => ephemeralKp:", wdEph.ephemeralKp.publicKey.toString());
         console.log("Withdraw from Meteora tx:", sig);
       } catch (err: any) {
         const msg = err.message || err.toString();
@@ -2093,6 +2120,7 @@ describe("zodiac-liquidity", () => {
         .signers([owner])
         .rpc({ commitment: "confirmed" });
 
+      console.log("[SIGNER] registerEphemeralWallet => owner:", owner.publicKey.toString());
       console.log("Register ephemeral wallet tx:", sig);
 
       const ephemeralAccount = await program.account.ephemeralWalletAccount.fetch(ephemeralPda);
@@ -2132,6 +2160,7 @@ describe("zodiac-liquidity", () => {
         .signers([owner])
         .rpc({ commitment: "confirmed" });
 
+      console.log("[SIGNER] closeEphemeralWallet => owner:", owner.publicKey.toString());
       console.log("Close ephemeral wallet tx:", sig);
 
       // Verify account is closed (should not exist)
