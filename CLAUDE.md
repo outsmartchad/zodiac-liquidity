@@ -36,6 +36,9 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Added:** `EphemeralWalletAccount` PDA + `register_ephemeral_wallet`, `close_ephemeral_wallet` instructions
 - **Changed:** 5 Meteora CPI instructions now use per-operation ephemeral wallet PDA auth instead of authority signer
 - **Changed:** All Meteora pool tests now use SOL-paired pools (SPL token + NATIVE_MINT/WSOL) instead of SPL/SPL pairs
+- **Changed:** All Meteora CPI test transactions use `sendWithEphemeralPayer()` — ephemeral keypair is sole signer/fee payer, auth wallet never co-signs
+- **Fixed:** `teardownEphemeralWallet` SOL return now uses ephemeral wallet as fee payer (was failing with `provider.sendAndConfirm`)
+- **Changed:** Fail test Meteora CPI setup uses real ephemeral wallets instead of owner-as-ephemeral shortcut
 - **Localnet (2026-01-30):** 40/40 tests passing (24 happy-path + 16 fail tests)
 - **Devnet (2026-01-31):** 40/40 passing
 
@@ -489,7 +492,9 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 17. **Blockhash retry patch** - On localnet, after heavy MPC activity (8 comp defs + 8 computations), the validator lags and blockhashes expire between fetch and confirmation. The test file patches `provider.sendAndConfirm` to auto-retry up to 3 times on "Blockhash not found" errors with a 2s delay. This covers all `.rpc()` calls since Anchor routes them through `provider.sendAndConfirm`. Eliminated all transient blockhash failures.
 18. **SOL-paired pools** - Meteora DAMM v2 pools should use NATIVE_MINT (WSOL) as one of the token pair. Fund relay WSOL accounts by transferring SOL + `createSyncNativeInstruction()` instead of `mintTo` + `fundRelay`. The on-chain `deposit_to_meteora_damm_v2` has built-in SOL wrapping via `sol_amount` parameter.
 19. **ARX node Docker image version must match Arcium SDK** - See dedicated section below: "ARX Node Version Mismatch (AccountDidNotDeserialize)".
-20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 24 tests) and `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 7 tests). The Anchor.toml glob `tests/**/*.ts` runs both. To run only happy-path, temporarily change glob to `tests/zodiac-liquidity.ts`.
+20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 24 tests) and `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 16 tests). The Anchor.toml script runs both. To run only one file, temporarily edit the `[scripts] test` line in Anchor.toml to list just one file.
+21. **Anchor `.rpc()` adds provider wallet as co-signer** - `program.methods.xxx().signers([ephKp]).rpc()` always adds the provider wallet (authority) as a 3rd signer via `provider.wallet.signTransaction()`. To send transactions signed only by ephemeral keypairs, use `.transaction()` + manual `tx.feePayer = ephKp.publicKey` + `connection.sendRawTransaction()`. The `sendWithEphemeralPayer()` helper in both test files handles this with blockhash retry logic. This also applies to `teardownEphemeralWallet` — the SOL return transfer must use the ephemeral wallet as fee payer, not `provider.sendAndConfirm`.
+22. **Fail test setup uses real ephemeral wallets** - The Meteora CPI fail test `before()` hook creates a pool and position using registered ephemeral wallets (via `setupEphemeralWallet` + `sendWithEphemeralPayer`), then tears them down. The actual fail test cases then try to use *unregistered* wallets against this pool/position and verify they get `AccountNotInitialized` errors. The setup wallets succeeding is correct — they're registered; only the test wallets should fail.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 
