@@ -6,7 +6,7 @@ use ark_bn254::Fr;
 use anchor_spl::token::{self, Token, TokenAccount, Mint, Transfer as SplTransfer};
 use anchor_spl::associated_token::AssociatedToken;
 
-declare_id!("H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23");
+declare_id!("AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb");
 
 pub mod merkle_tree;
 pub mod utils;
