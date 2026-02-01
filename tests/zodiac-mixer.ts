@@ -2,8 +2,18 @@ import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { ZodiacMixer } from "../target/types/zodiac_mixer";
 import { LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
+import {
+  createMint,
+  createAssociatedTokenAccountIdempotent,
+  createAssociatedTokenAccountIdempotentInstruction,
+  mintTo,
+  getAssociatedTokenAddressSync,
+  getAccount,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
 import { expect } from "chai";
-import { getExtDataHash } from "./lib/utils";
+import { getExtDataHash, getMintAddressField } from "./lib/utils";
 import { DEFAULT_HEIGHT, FIELD_SIZE, ROOT_HISTORY_SIZE, DEPOSIT_FEE_RATE, WITHDRAW_FEE_RATE } from "./lib/constants";
 
 import * as path from 'path';
@@ -17,8 +27,10 @@ import { BN } from 'bn.js';
 import {
   createGlobalTestALT,
   getTestProtocolAddresses,
+  getTestProtocolAddressesWithMint,
   createVersionedTransactionWithALT,
   sendAndConfirmVersionedTransaction,
+  resetGlobalTestALT,
 } from "./lib/test_alt";
 
 // Convert on-chain [u8; 32] (big-endian) to field element decimal string
@@ -223,7 +235,7 @@ async function generateProofAndFormat(
     inAmount: inputs.map(x => x.amount.toString(10)),
     inPrivateKey: inputs.map(x => x.keypair.privkey),
     inBlinding: inputs.map(x => x.blinding.toString(10)),
-    mintAddress: inputs[0].mintAddress,
+    mintAddress: getMintAddressField(new PublicKey(inputs[0].mintAddress)),
     inPathIndices: inputMerklePathIndices,
     inPathElements: inputMerklePathElements,
     outAmount: outputs.map(x => x.amount.toString(10)),
@@ -1654,5 +1666,695 @@ describe("Zodiac Mixer", () => {
       expect(error).to.exist;
       expect(error.toString()).to.not.include("Should have failed");
     }
+  });
+
+  // =========================================================================
+  // SPL TOKEN TESTS
+  // =========================================================================
+  describe("SPL Token", () => {
+    let splMint: PublicKey;
+    let splTreeAccountPDA: PublicKey;
+    let splTreeAta: PublicKey;
+    let signerAta: PublicKey;
+    let recipientAta: PublicKey;
+    let feeRecipientAta: PublicKey;
+    let splAltAddress: PublicKey;
+    let splSyncTree: SubtreesMerkleTree;
+    let splInitialNextIndex: number;
+    const SPL_DEPOSIT_AMOUNT = 1_000_000; // 1M token units
+    const SPL_MAX_DEPOSIT = 1_000_000_000_000; // 1T token units
+
+    // Helper: execute an SPL transact instruction via versioned tx
+    async function executeTransactSpl(
+      proofToSubmit: any,
+      extData: any,
+      signer: anchor.web3.Keypair,
+      signerTokenAccount: PublicKey,
+      recipientWallet: PublicKey,
+      recipientTokenAccount: PublicKey,
+    ) {
+      const nullifiers = findNullifierPDAs(program, proofToSubmit);
+      const crossCheckNullifiers = findCrossCheckNullifierPDAs(program, proofToSubmit);
+
+      const modifyComputeUnits = anchor.web3.ComputeBudgetProgram.setComputeUnitLimit({
+        units: 1_000_000
+      });
+
+      const tx = await (program.methods
+        .transactSpl(
+          proofToSubmit,
+          createExtDataMinified(extData),
+          extData.encryptedOutput1,
+          extData.encryptedOutput2,
+        ) as any)
+        .accounts({
+          treeAccount: splTreeAccountPDA,
+          nullifier0: nullifiers.nullifier0PDA,
+          nullifier1: nullifiers.nullifier1PDA,
+          nullifier2: crossCheckNullifiers.nullifier2PDA,
+          nullifier3: crossCheckNullifiers.nullifier3PDA,
+          globalConfig: globalConfigPDA,
+          signer: signer.publicKey,
+          mint: splMint,
+          signerTokenAccount: signerTokenAccount,
+          recipient: recipientWallet,
+          recipientTokenAccount: recipientTokenAccount,
+          treeAta: splTreeAta,
+          feeRecipientAta: feeRecipientAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+        })
+        .signers([signer])
+        .preInstructions([modifyComputeUnits])
+        .transaction();
+
+      const versionedTx = await createVersionedTransactionWithALT(
+        provider.connection,
+        signer.publicKey,
+        tx.instructions,
+        splAltAddress,
+      );
+
+      return await sendAndConfirmVersionedTransaction(
+        provider.connection,
+        versionedTx,
+        [signer],
+      );
+    }
+
+    before(async () => {
+      const providerWallet = (provider.wallet as any).payer as anchor.web3.Keypair;
+
+      // 1. Create SPL mint (authority = provider wallet)
+      splMint = await createMint(
+        provider.connection,
+        providerWallet,
+        providerWallet.publicKey,
+        null,
+        6, // 6 decimals
+      );
+
+      // 2. Derive SPL tree PDA
+      [splTreeAccountPDA] = PublicKey.findProgramAddressSync(
+        [Buffer.from("merkle_tree"), splMint.toBuffer()],
+        program.programId,
+      );
+
+      // 3. Create ATAs for all parties
+      signerAta = await createAssociatedTokenAccountIdempotent(
+        provider.connection, providerWallet, splMint, randomUser.publicKey,
+      );
+      recipientAta = await createAssociatedTokenAccountIdempotent(
+        provider.connection, providerWallet, splMint, recipient.publicKey,
+      );
+      feeRecipientAta = await createAssociatedTokenAccountIdempotent(
+        provider.connection, providerWallet, splMint, feeRecipient.publicKey,
+      );
+
+      // Tree ATA is owned by global_config PDA — create explicitly (needed before mintTo)
+      // Use allowOwnerOffCurve since globalConfigPDA is a PDA
+      splTreeAta = getAssociatedTokenAddressSync(splMint, globalConfigPDA, true);
+      const treeAtaInfo = await provider.connection.getAccountInfo(splTreeAta);
+      if (!treeAtaInfo) {
+        const createAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+          providerWallet.publicKey, splTreeAta, globalConfigPDA, splMint,
+        );
+        const createAtaTx = new anchor.web3.Transaction().add(createAtaIx);
+        await provider.connection.sendTransaction(createAtaTx, [providerWallet]);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+
+      // 4. Mint tokens to signer for testing
+      await mintTo(
+        provider.connection, providerWallet, splMint,
+        signerAta, providerWallet, 100_000_000, // 100M tokens
+      );
+
+      // Fund tree ATA with tokens for withdrawal liquidity
+      await mintTo(
+        provider.connection, providerWallet, splMint,
+        splTreeAta, providerWallet, 50_000_000, // 50M tokens
+      );
+
+      // 5. Initialize SPL tree (skip if already initialized on devnet)
+      const existingSplTree = await provider.connection.getAccountInfo(splTreeAccountPDA);
+      if (!existingSplTree) {
+        await (program.methods
+          .initializeTreeAccountForSplToken(new anchor.BN(SPL_MAX_DEPOSIT)) as any)
+          .accounts({
+            treeAccount: splTreeAccountPDA,
+            mint: splMint,
+            globalConfig: globalConfigPDA,
+            authority: authority.publicKey,
+            systemProgram: anchor.web3.SystemProgram.programId,
+          })
+          .signers([authority])
+          .rpc();
+      } else {
+        console.log("    SPL tree already initialized, skipping init");
+      }
+
+      // 6. Create SPL-specific ALT (need separate ALT since globalTestALT is cached for SOL)
+      resetGlobalTestALT();
+      const splProtocolAddresses = getTestProtocolAddressesWithMint(
+        program.programId,
+        authority.publicKey,
+        splTreeAta,
+        feeRecipient.publicKey,
+        feeRecipientAta,
+        splTreeAccountPDA,
+        splMint,
+      );
+      // Add extra addresses needed for SPL transact
+      const extraAddresses = [
+        randomUser.publicKey,
+        signerAta,
+        recipient.publicKey,
+        recipientAta,
+      ];
+      splAltAddress = await createGlobalTestALT(
+        provider.connection,
+        authority,
+        [...splProtocolAddresses, ...extraAddresses],
+      );
+
+      // 7. Ensure deposit limit is correct
+      const splTreeData = await program.account.merkleTreeAccount.fetch(splTreeAccountPDA);
+      if (Number(splTreeData.maxDepositAmount.toString()) !== SPL_MAX_DEPOSIT) {
+        await (program.methods
+          .updateDepositLimitForSplToken(new anchor.BN(SPL_MAX_DEPOSIT)) as any)
+          .accounts({
+            treeAccount: splTreeAccountPDA,
+            mint: splMint,
+            authority: authority.publicKey,
+          })
+          .signers([authority])
+          .rpc();
+      }
+
+      // 8. Sync SPL client-side merkle tree with on-chain state
+      const onChainSplTree = await program.account.merkleTreeAccount.fetch(splTreeAccountPDA);
+      splInitialNextIndex = (onChainSplTree.nextIndex as any).toNumber();
+      splSyncTree = new SubtreesMerkleTree(
+        onChainSplTree.subtrees as number[][],
+        onChainSplTree.root as number[],
+        splInitialNextIndex,
+        DEFAULT_HEIGHT,
+        lightWasm,
+      );
+      console.log(`    SPL synced: nextIndex=${splInitialNextIndex}, mint=${splMint.toBase58().slice(0, 12)}...`);
+    });
+
+    after(async () => {
+      // Reset ALT cache so SOL tests can create their own on next run
+      resetGlobalTestALT();
+    });
+
+    // =========================================================================
+    // Test 18: SPL deposit
+    // =========================================================================
+    it("deposits SPL tokens with valid ZK proof", async () => {
+      const depositAmount = SPL_DEPOSIT_AMOUNT;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+      const mintStr = splMint.toBase58();
+
+      const extData = {
+        recipient: recipientAta, // SPL uses token account key, not wallet
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.from("enc_spl_dep_out1"),
+        encryptedOutput2: Buffer.from("enc_spl_dep_out2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta, // SPL uses ATA key
+        mintAddress: splMint,
+      };
+
+      const inputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+
+      const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const outputs = [
+        new Utxo({ lightWasm, amount: publicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const { proofToSubmit, outputCommitments } = await generateProofAndFormat(
+        inputs, outputs, splSyncTree, extData, lightWasm, keyBasePath,
+      );
+
+      const treeAtaBalanceBefore = (await getAccount(provider.connection, splTreeAta)).amount;
+
+      await executeTransactSpl(
+        proofToSubmit, extData, randomUser, signerAta,
+        recipient.publicKey, recipientAta,
+      );
+
+      // Verify tree state updated
+      const treeData = await program.account.merkleTreeAccount.fetch(splTreeAccountPDA);
+      const newNextIndex = Number(treeData.nextIndex.toString());
+      expect(newNextIndex).to.equal(splInitialNextIndex + 2);
+
+      // Verify tokens transferred to tree ATA
+      const treeAtaBalanceAfter = (await getAccount(provider.connection, splTreeAta)).amount;
+      expect(Number(treeAtaBalanceAfter - treeAtaBalanceBefore)).to.equal(depositAmount);
+
+      // Update client-side tree
+      splSyncTree.insertPair(outputCommitments[0], outputCommitments[1]);
+
+      // Verify root matches
+      const onChainRoot = treeData.root;
+      const clientRoot = splSyncTree.root();
+      const clientRootBytes = Array.from(
+        utils.leInt2Buff(utils.unstringifyBigInts(clientRoot), 32)
+      ).reverse();
+      expect(onChainRoot).to.deep.equal(clientRootBytes);
+    });
+
+    // =========================================================================
+    // Test 19: SPL withdrawal
+    // =========================================================================
+    it("withdraws SPL tokens with valid ZK proof", async () => {
+      const mintStr = splMint.toBase58();
+
+      // First deposit
+      const depositAmount = 500_000;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+      const depositExtData = {
+        recipient: recipientAta,
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.from("enc_spl_wd_dep1"),
+        encryptedOutput2: Buffer.from("enc_spl_wd_dep2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const depositInputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+
+      const depositPublicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const depositOutputs = [
+        new Utxo({ lightWasm, amount: depositPublicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const depositResult = await generateProofAndFormat(
+        depositInputs, depositOutputs, splSyncTree, depositExtData, lightWasm, keyBasePath,
+      );
+
+      await executeTransactSpl(
+        depositResult.proofToSubmit, depositExtData, randomUser, signerAta,
+        recipient.publicKey, recipientAta,
+      );
+
+      splSyncTree.insertPair(depositResult.outputCommitments[0], depositResult.outputCommitments[1]);
+
+      // Now withdraw
+      const withdrawInputs = [
+        depositOutputs[0],
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+      const withdrawOutputs = [
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const inputsSum = withdrawInputs.reduce((sum, x) => sum.add(x.amount), new BN(0));
+      const withdrawFee = new anchor.BN(calculateWithdrawalFee(inputsSum.toNumber()));
+      const extAmount = withdrawFee.add(new BN(0)).sub(inputsSum);
+
+      const withdrawExtData = {
+        recipient: recipientAta,
+        extAmount: extAmount,
+        encryptedOutput1: Buffer.from("enc_spl_wd_w1"),
+        encryptedOutput2: Buffer.from("enc_spl_wd_w2"),
+        fee: withdrawFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const recipientBalanceBefore = (await getAccount(provider.connection, recipientAta)).amount;
+      const feeBalanceBefore = (await getAccount(provider.connection, feeRecipientAta)).amount;
+
+      const withdrawResult = await generateProofAndFormat(
+        withdrawInputs, withdrawOutputs, splSyncTree, withdrawExtData, lightWasm, keyBasePath,
+      );
+
+      await executeTransactSpl(
+        withdrawResult.proofToSubmit, withdrawExtData, randomUser, signerAta,
+        recipient.publicKey, recipientAta,
+      );
+
+      splSyncTree.insertPair(withdrawResult.outputCommitments[0], withdrawResult.outputCommitments[1]);
+
+      // Verify recipient received tokens (amount minus fee)
+      const recipientBalanceAfter = (await getAccount(provider.connection, recipientAta)).amount;
+      const withdrawnAmount = inputsSum.sub(withdrawFee).toNumber();
+      expect(Number(recipientBalanceAfter - recipientBalanceBefore)).to.equal(withdrawnAmount);
+
+      // Verify fee recipient received fee
+      const feeBalanceAfter = (await getAccount(provider.connection, feeRecipientAta)).amount;
+      expect(Number(feeBalanceAfter - feeBalanceBefore)).to.equal(withdrawFee.toNumber());
+    });
+
+    // =========================================================================
+    // Test 20: SPL double-spend prevention
+    // =========================================================================
+    it("prevents SPL double-spend attacks", async () => {
+      const mintStr = splMint.toBase58();
+      const depositAmount = 400_000;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+      const depositExtData = {
+        recipient: recipientAta,
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.from("enc_spl_ds_d1"),
+        encryptedOutput2: Buffer.from("enc_spl_ds_d2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const depositInputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+
+      const depositPublicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const depositOutputs = [
+        new Utxo({ lightWasm, amount: depositPublicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const depositResult = await generateProofAndFormat(
+        depositInputs, depositOutputs, splSyncTree, depositExtData, lightWasm, keyBasePath,
+      );
+
+      await executeTransactSpl(
+        depositResult.proofToSubmit, depositExtData, randomUser, signerAta,
+        recipient.publicKey, recipientAta,
+      );
+
+      splSyncTree.insertPair(depositResult.outputCommitments[0], depositResult.outputCommitments[1]);
+
+      // First withdrawal (valid)
+      const targetUtxo = depositOutputs[0];
+      const firstInputs = [targetUtxo, new Utxo({ lightWasm, mintAddress: mintStr })];
+      const firstOutputs = [
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+      const inputsSum = firstInputs.reduce((sum, x) => sum.add(x.amount), new BN(0));
+      const firstFee = new anchor.BN(calculateWithdrawalFee(inputsSum.toNumber()));
+      const firstExtAmount = firstFee.add(new BN(0)).sub(inputsSum);
+
+      const firstExtData = {
+        recipient: recipientAta,
+        extAmount: firstExtAmount,
+        encryptedOutput1: Buffer.from("enc_spl_ds_w1"),
+        encryptedOutput2: Buffer.from("enc_spl_ds_w2"),
+        fee: firstFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const firstResult = await generateProofAndFormat(
+        firstInputs, firstOutputs, splSyncTree, firstExtData, lightWasm, keyBasePath,
+      );
+
+      await executeTransactSpl(
+        firstResult.proofToSubmit, firstExtData, randomUser, signerAta,
+        recipient.publicKey, recipientAta,
+      );
+
+      splSyncTree.insertPair(firstResult.outputCommitments[0], firstResult.outputCommitments[1]);
+
+      // Second attempt (double-spend) — swap input positions
+      const secondInputs = [new Utxo({ lightWasm, mintAddress: mintStr }), targetUtxo];
+      const secondOutputs = [
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+      const secondFee = new anchor.BN(calculateWithdrawalFee(inputsSum.toNumber()));
+      const secondExtAmount = secondFee.add(new BN(0)).sub(inputsSum);
+
+      const secondExtData = {
+        recipient: recipientAta,
+        extAmount: secondExtAmount,
+        encryptedOutput1: Buffer.from("enc_spl_ds2_1"),
+        encryptedOutput2: Buffer.from("enc_spl_ds2_2"),
+        fee: secondFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      try {
+        const secondResult = await generateProofAndFormat(
+          secondInputs, secondOutputs, splSyncTree, secondExtData, lightWasm, keyBasePath,
+        );
+
+        await executeTransactSpl(
+          secondResult.proofToSubmit, secondExtData, randomUser, signerAta,
+          recipient.publicKey, recipientAta,
+        );
+        expect.fail("SPL double-spend should have failed");
+      } catch (error: any) {
+        expect(error).to.exist;
+      }
+    });
+
+    // =========================================================================
+    // Test 21: SPL deposit limit enforcement
+    // =========================================================================
+    it("enforces SPL deposit limit", async () => {
+      const mintStr = splMint.toBase58();
+
+      // Set a low deposit limit
+      const lowLimit = new anchor.BN(100_000);
+      await (program.methods
+        .updateDepositLimitForSplToken(lowLimit) as any)
+        .accounts({
+          treeAccount: splTreeAccountPDA,
+          mint: splMint,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+
+      // Try to deposit more than the limit
+      const depositAmount = 200_000;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+      const extData = {
+        recipient: recipientAta,
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.from("enc_spl_lim_1"),
+        encryptedOutput2: Buffer.from("enc_spl_lim_2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const inputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+      const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const outputs = [
+        new Utxo({ lightWasm, amount: publicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const { proofToSubmit } = await generateProofAndFormat(
+        inputs, outputs, splSyncTree, extData, lightWasm, keyBasePath,
+      );
+
+      try {
+        await executeTransactSpl(
+          proofToSubmit, extData, randomUser, signerAta,
+          recipient.publicKey, recipientAta,
+        );
+        expect.fail("Should have thrown DepositLimitExceeded");
+      } catch (error: any) {
+        expect(error.toString()).to.include("DepositLimitExceeded");
+      }
+
+      // Restore limit
+      await (program.methods
+        .updateDepositLimitForSplToken(new anchor.BN(SPL_MAX_DEPOSIT)) as any)
+        .accounts({
+          treeAccount: splTreeAccountPDA,
+          mint: splMint,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+    });
+
+    // =========================================================================
+    // Test 22: SPL deposit limit update
+    // =========================================================================
+    it("updates SPL deposit limit", async () => {
+      const newLimit = new anchor.BN(999_999);
+      await (program.methods
+        .updateDepositLimitForSplToken(newLimit) as any)
+        .accounts({
+          treeAccount: splTreeAccountPDA,
+          mint: splMint,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+
+      const treeData = await program.account.merkleTreeAccount.fetch(splTreeAccountPDA);
+      expect(treeData.maxDepositAmount.toString()).to.equal("999999");
+
+      // Restore
+      await (program.methods
+        .updateDepositLimitForSplToken(new anchor.BN(SPL_MAX_DEPOSIT)) as any)
+        .accounts({
+          treeAccount: splTreeAccountPDA,
+          mint: splMint,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+    });
+
+    // =========================================================================
+    // Test 23: Unauthorized SPL deposit limit update
+    // =========================================================================
+    it("rejects unauthorized SPL deposit limit update", async () => {
+      const attacker = anchor.web3.Keypair.generate();
+      fundedKeypairs.push(attacker);
+      await fundKeypair(provider, attacker.publicKey, 0.005 * LAMPORTS_PER_SOL);
+
+      try {
+        await (program.methods
+          .updateDepositLimitForSplToken(new anchor.BN(1)) as any)
+          .accounts({
+            treeAccount: splTreeAccountPDA,
+            mint: splMint,
+            authority: attacker.publicKey,
+          })
+          .signers([attacker])
+          .rpc();
+        expect.fail("Should have thrown");
+      } catch (error: any) {
+        expect(error.toString()).to.include("Unauthorized");
+      }
+    });
+
+    // =========================================================================
+    // Test 24: Pause applies to SPL transactions
+    // =========================================================================
+    it("blocks SPL transactions when mixer is paused", async () => {
+      const mintStr = splMint.toBase58();
+
+      // Pause the mixer
+      await program.methods
+        .togglePause()
+        .accounts({
+          globalConfig: globalConfigPDA,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+
+      const depositAmount = 100_000;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+      const extData = {
+        recipient: recipientAta,
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.from("enc_spl_pause1"),
+        encryptedOutput2: Buffer.from("enc_spl_pause2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const inputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+      const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const outputs = [
+        new Utxo({ lightWasm, amount: publicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const { proofToSubmit } = await generateProofAndFormat(
+        inputs, outputs, splSyncTree, extData, lightWasm, keyBasePath,
+      );
+
+      try {
+        await executeTransactSpl(
+          proofToSubmit, extData, randomUser, signerAta,
+          recipient.publicKey, recipientAta,
+        );
+        expect.fail("Should have thrown MixerPaused");
+      } catch (error: any) {
+        expect(error.toString()).to.include("MixerPaused");
+      }
+
+      // Unpause to not affect other tests
+      await program.methods
+        .togglePause()
+        .accounts({
+          globalConfig: globalConfigPDA,
+          authority: authority.publicKey,
+        })
+        .signers([authority])
+        .rpc();
+    });
+
+    // =========================================================================
+    // Test 25: SPL oversized encrypted output rejected
+    // =========================================================================
+    it("rejects oversized encrypted outputs (SPL)", async () => {
+      const mintStr = splMint.toBase58();
+      const depositAmount = 100_000;
+      const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+      const extData = {
+        recipient: recipientAta,
+        extAmount: new anchor.BN(depositAmount),
+        encryptedOutput1: Buffer.alloc(257, 0xBB), // exceeds MAX_ENCRYPTED_OUTPUT_SIZE
+        encryptedOutput2: Buffer.from("enc_spl_big_2"),
+        fee: depositFee,
+        feeRecipient: feeRecipientAta,
+        mintAddress: splMint,
+      };
+
+      const inputs = [
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+        new Utxo({ lightWasm, mintAddress: mintStr }),
+      ];
+      const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+      const outputs = [
+        new Utxo({ lightWasm, amount: publicAmount.toString(), index: splSyncTree.nextIndex, mintAddress: mintStr }),
+        new Utxo({ lightWasm, amount: '0', mintAddress: mintStr }),
+      ];
+
+      const { proofToSubmit } = await generateProofAndFormat(
+        inputs, outputs, splSyncTree, extData, lightWasm, keyBasePath,
+      );
+
+      try {
+        await executeTransactSpl(
+          proofToSubmit, extData, randomUser, signerAta,
+          recipient.publicKey, recipientAta,
+        );
+        expect.fail("Should have thrown EncryptedOutputTooLarge");
+      } catch (error: any) {
+        expect(error.toString()).to.include("EncryptedOutputTooLarge");
+      }
+    });
   });
 });
