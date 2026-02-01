@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 54/54 passing (17 mixer + 37 integration), Devnet 37/37 passing (3-user sequential integration). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening.
+**Phase:** Localnet 62/62 passing (25 mixer + 37 integration), Devnet 25/25 mixer passing (17 SOL + 8 SPL). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening + SPL token mixer tests.
 
 **Current Program ID (devnet):** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
 **Localnet Program ID:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
@@ -61,6 +61,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Changed (2026-01-31):** Mixer tests expanded 12→17 tests. Added: oversized encrypted output, pause/unpause, unauthorized pause, cross-check double-spend verification. All existing fail tests tightened from bare try/catch to specific error code assertions.
 - **Fixed (2026-01-31):** `sendAndConfirmVersionedTransaction` in `tests/lib/test_alt.ts` now has blockhash retry logic (up to 3 retries with 2s delay). Fixes transient "Blockhash not found" failures in mixer tests on localnet.
 - **Localnet (2026-01-31):** 54/54 passing (17 mixer + 37 integration).
+- **Localnet (2026-02-01):** 62/62 passing (25 mixer + 37 integration). SPL token mixer tests added.
 - **Added (2026-02-01):** SPL token tests for ZK mixer — 8 new tests covering deposit, withdrawal, double-spend prevention, deposit limit, pause enforcement, oversized outputs, and auth checks. Fixed `generateProofAndFormat` to use `getMintAddressField()` for circuit mintAddress input (base58 → field element conversion).
 - **Devnet (2026-02-01):** 25/25 mixer tests passing (17 SOL + 8 SPL).
 
@@ -717,13 +718,13 @@ CircuitSource::OffChain(OffChainCircuitSource {
 docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*.json"
 ```
 
-## Test Results (2026-01-31)
+## Test Results (2026-02-01)
 
-### Localnet (54/54 passing — mixer security hardening + integration)
+### Localnet (62/62 passing — mixer SOL+SPL + integration)
 
-**Programs:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` (zodiac_liquidity), `H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23` (zodiac_mixer)
+**Programs:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` (zodiac_liquidity), `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` (zodiac_mixer)
 **ARX nodes:** `arcium/arx-node:v0.6.3` (pinned via `docker tag`)
-**Date:** 2026-01-31
+**Date:** 2026-02-01
 
 **File: `tests/zodiac-mixer.ts` (25 tests — SOL + SPL token mixer)**
 
@@ -787,6 +788,16 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 7 | fails register with wrong authority | PASS |
 
 **Note:** Comp def inits and vault/position creation consolidated into `before()` hooks for unit tests (happy-path + fail). Only the integration test keeps them as individual `it()` tests for visibility. The `zodiac-liquidity.ts` and `zodiac-liquidity-fail.ts` tests are not currently in the Anchor.toml script — they run when all test files are included.
+
+### Devnet (25/25 passing — mixer SOL + SPL)
+
+**Program:** `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` (zodiac_mixer)
+**Cluster:** devnet
+**Date:** 2026-02-01
+
+**File: `tests/zodiac-mixer.ts` (25 tests — SOL + SPL token mixer)**
+
+Same test table as localnet above — all 25 tests pass on devnet.
 
 ### Devnet (37/37 passing — 3-user sequential integration)
 
