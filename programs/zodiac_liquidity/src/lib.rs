@@ -42,7 +42,7 @@ const COMP_DEF_OFFSET_WITHDRAW: u32 = comp_def_offset("compute_withdrawal");
 const COMP_DEF_OFFSET_CLEAR_POSITION: u32 = comp_def_offset("clear_position");
 const COMP_DEF_OFFSET_GET_POSITION: u32 = comp_def_offset("get_user_position");
 
-declare_id!("5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu");
+declare_id!("7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2");
 
 #[arcium_program]
 pub mod zodiac_liquidity {

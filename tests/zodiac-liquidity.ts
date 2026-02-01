@@ -747,8 +747,8 @@ describe("zodiac-liquidity", () => {
       await new Promise(resolve => setTimeout(resolve, 3000));
 
       // Encrypt the deposit amounts (base + quote)
-      const baseDepositAmount = BigInt(1_000_000_000); // 1 base token with 9 decimals
-      const quoteDepositAmount = BigInt(500_000_000);  // 0.5 SOL (WSOL) with 9 decimals
+      const baseDepositAmount = BigInt(50_000_000); // 0.05 base token with 9 decimals
+      const quoteDepositAmount = BigInt(50_000_000);  // 0.05 SOL (WSOL) with 9 decimals
       const plaintext = [baseDepositAmount, quoteDepositAmount];
       const nonce = randomBytes(16);
       const ciphertext = cipher.encrypt(plaintext, nonce);
@@ -767,7 +767,7 @@ describe("zodiac-liquidity", () => {
         tokenMint,
         userTokenAccount.address,
         owner,
-        2_000_000_000 // Mint 2 tokens
+        100_000_000 // Mint 0.1 tokens
       );
 
       // Create vault base token account
@@ -791,7 +791,7 @@ describe("zodiac-liquidity", () => {
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
           toPubkey: userQuoteTokenAccount.address,
-          lamports: 1_000_000_000, // 1 SOL
+          lamports: 100_000_000, // 0.1 SOL
         }),
         createSyncNativeInstruction(userQuoteTokenAccount.address)
       );
@@ -1095,8 +1095,8 @@ describe("zodiac-liquidity", () => {
         program.programId
       )[0];
 
-      const baseWithdrawAmount = new anchor.BN(1_000_000_000); // withdraw full base deposit (1 token)
-      const quoteWithdrawAmount = new anchor.BN(500_000_000); // withdraw full quote deposit (0.5 SOL)
+      const baseWithdrawAmount = new anchor.BN(50_000_000); // withdraw full base deposit (0.05 token)
+      const quoteWithdrawAmount = new anchor.BN(50_000_000); // withdraw full quote deposit (0.05 SOL)
 
       const finalizeSig = await queueWithRetry(
         "clearPosition",
