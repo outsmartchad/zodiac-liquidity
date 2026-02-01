@@ -8,11 +8,11 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 41/41 passing (21 unit + 20 integration), Devnet needs fresh deploy (account layouts changed). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery.
+**Phase:** Localnet 41/41 passing (21 unit + 20 integration), Devnet 37/37 passing (3-user sequential integration). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery.
 
-**Current Program ID (devnet):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`
-**Localnet Program ID:** `32AfHsKshTPETofiAcECgNXeSLKztwzVH1qXju3dpA3K`
-**Closed Program IDs (do NOT reuse):** `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`
+**Current Program ID (devnet):** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
+**Localnet Program ID:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
+**Closed Program IDs (do NOT reuse):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`
 
 **What's Done:**
 - Project structure created
@@ -48,6 +48,8 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Added (2026-01-31):** `close_relay_token_account` instruction — authority-gated, closes relay PDA's token account (must have zero balance), returns rent to authority.
 - **Changed (2026-01-31):** All three test files now reclaim relay PDA SOL + close token accounts in `after()` hooks. Previously relay PDA SOL was lost on devnet.
 - **Fixed (2026-01-31):** `CreateVault` struct field ordering — `quote_mint` must come AFTER `vault` to avoid PDA seed misread. Anchor's `init_if_needed` + PDA seeds resolution shifts account positions when extra accounts are between the seed source and PDA account.
+- **Devnet (2026-01-31):** Fresh deploy to `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`. 37/37 devnet integration tests passing (3-user sequential flow: User1 5M, User2 3M, User3 2M; User2 mid-flow withdrawal; User1+User3 final withdrawal).
+- **Changed (2026-01-31):** Integration test rewritten for multi-user sequential flow — 3 independent users deposit/withdraw in sequence with mid-flow partial withdrawal. Replaced single-user 20-test flow with 37-test 3-user flow.
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -62,7 +64,7 @@ The `.idarc` circuit descriptor shows `Shared` parameters require BOTH `arcis_x2
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| **Phase 1** | Zodiac Program (Arcium MPC + Meteora CPI + Relay PDA) | **COMPLETE** (29/29 tests) |
+| **Phase 1** | Zodiac Program (Arcium MPC + Meteora CPI + Relay PDA) | **COMPLETE** (41 localnet + 37 devnet) |
 | **Phase 2** | ZK Mixer Program (scaffolded in `privacy-cash/`) | Not implemented |
 | **Phase 3** | Client SDK (TypeScript library for frontend integration) | Not started |
 | **Phase 4** | Relayer Service (off-chain service for mixer withdraw proofs) | Not started |
@@ -649,7 +651,7 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 ### Localnet (41/41 passing — dual-token redesign)
 
-**Program:** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` (localnet, via `anchor keys sync`)
+**Program:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` (localnet, via `anchor keys sync`)
 **ARX nodes:** `arcium/arx-node:v0.6.3` (pinned via `docker tag`)
 **Date:** 2026-01-31
 
@@ -704,9 +706,46 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 **Note:** Comp def inits and vault/position creation consolidated into `before()` hooks for unit tests (happy-path + fail). Only the integration test keeps them as individual `it()` tests for visibility.
 
-### Devnet — Needs Fresh Deploy
+### Devnet (37/37 passing — 3-user sequential integration)
 
-Account layouts changed in the dual-token redesign (VaultAccount +32 bytes for quote_mint, +64 bytes for expanded vault_state; UserPositionAccount +32 bytes). The existing devnet program is incompatible. Follow the "Fresh Devnet Deploy Procedure" in the Commands section.
+**Program:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
+**Cluster:** devnet (offset 456)
+**Date:** 2026-01-31
+
+**File: `tests/zodiac-mpc-meteora-integration.ts` (37 tests — 3-user sequential deposit/withdrawal)**
+
+| # | Test | Status |
+|---|------|--------|
+| 1-8 | comp def inits (8 circuits) | PASS |
+| 9 | creates vault (MPC) | PASS |
+| 10 | creates pool and position via relay | PASS |
+| 11 | creates user1 position (MPC) | PASS |
+| 12 | user1 deposits 5M base + 5M quote (MPC) | PASS |
+| 13 | reveals pending deposits (expect 5M/5M) | PASS |
+| 14 | funds relay with revealed amount | PASS |
+| 15 | deposits to Meteora and records liquidity delta | PASS |
+| 16 | records liquidity in Arcium | PASS |
+| 17 | creates user2 position (MPC) | PASS |
+| 18 | user2 deposits 3M base + 3M quote (MPC) | PASS |
+| 19 | reveals pending deposits (expect 3M/3M) | PASS |
+| 20 | funds relay with revealed amount | PASS |
+| 21 | deposits to Meteora and records liquidity delta | PASS |
+| 22 | records liquidity in Arcium | PASS |
+| 23 | user1 gets their position (expect 5M/5M) | PASS |
+| 24 | creates user3 position (MPC) | PASS |
+| 25 | user3 deposits 2M base + 2M quote (MPC) | PASS |
+| 26 | reveals pending deposits (expect 2M/2M) | PASS |
+| 27 | funds relay with revealed amount | PASS |
+| 28 | deposits to Meteora and records liquidity delta | PASS |
+| 29 | records liquidity in Arcium | PASS |
+| 30 | computes withdrawal for User2 (expect 3M/3M) | PASS |
+| 31 | withdraws User2's liquidity share from Meteora | PASS |
+| 32 | transfers tokens from relay to User2 destination | PASS |
+| 33 | clears User2 position | PASS |
+| 34 | computes withdrawal for User1 (expect 5M/5M) | PASS |
+| 35 | computes withdrawal for User3 (expect 2M/2M) | PASS |
+| 36 | withdraws remaining liquidity from Meteora (all of it) | PASS |
+| 37 | transfers tokens to User1 + User3 and clears positions | PASS |
 
 ### Integration Test Details
 

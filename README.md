@@ -73,8 +73,10 @@ zodiac-liquidity/
 │   └── zodiac_mixer/              # ZK Mixer program (Phase 2, scaffolded)
 ├── encrypted-ixs/                 # Arcis MPC circuits (8 circuits)
 ├── tests/
-│   ├── zodiac-liquidity.ts        # Liquidity integration tests
-│   └── zodiac-mixer.ts            # Mixer tests
+│   ├── zodiac-liquidity.ts        # Happy-path unit tests (14 tests)
+│   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (7 tests)
+│   └── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests)
+├── scripts/                       # Utility scripts (cleanup, analysis)
 └── build/                         # Compiled circuits (.arcis, .hash)
 ```
 
@@ -82,4 +84,30 @@ zodiac-liquidity/
 
 | Network | Program ID |
 |---------|-----------|
-| Devnet | `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu` |
+| Devnet | `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` |
+
+## Test Status
+
+| Environment | Tests | Status |
+|-------------|-------|--------|
+| Localnet | 41/41 (14 happy-path + 7 fail + 20 integration) | Passing |
+| Devnet | 37/37 (3-user sequential integration) | Passing |
+
+## Full Transaction Flow (13 Steps)
+
+```
+ 1. [user]       mixer.transact(proof)              -- deposit SOL/SPL to mixer
+ 2. [relayer]    mixer.transact(proof)              -- withdraw to ephemeral wallet
+ 3. [authority]  zodiac.register_ephemeral_wallet() -- register ephemeral wallet PDA
+ 4. [ephemeral]  zodiac.deposit(encrypted_amt)      -- deposit to vault
+ 5. [authority]  zodiac.reveal_pending_deposits()    -- Arcium reveals aggregate
+ 6. [authority]  zodiac.fund_relay(idx, amount)      -- vault -> relay PDA
+ 7. [ephemeral]  zodiac.deposit_to_meteora(...)      -- relay PDA -> Meteora add_liquidity
+ 8. [authority]  zodiac.record_liquidity(delta)      -- record in Arcium
+ --- withdrawal ---
+ 9. [ephemeral]  zodiac.withdraw(pubkey, nonce)      -- Arcium computes share
+10. [ephemeral]  zodiac.withdraw_from_meteora(...)   -- relay removes liquidity
+11. [authority]  zodiac.relay_transfer_to_dest()     -- relay -> ephemeral wallet
+12. [authority]  zodiac.clear_position(base, quote)   -- zero Arcium state
+13. [authority]  zodiac.close_ephemeral_wallet()     -- close PDA, reclaim rent
+```
