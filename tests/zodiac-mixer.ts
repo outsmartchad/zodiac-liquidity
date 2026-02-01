@@ -964,8 +964,11 @@ describe("Zodiac Mixer", () => {
       );
       expect.fail("Should have thrown");
     } catch (error: any) {
-      const errorString = error.toString();
-      expect(errorString).to.include("DepositLimitExceeded");
+      // Error code 6011 = 0x177b = DepositLimitExceeded
+      const errorString = error.toString() + (error.message || '') + JSON.stringify(error.logs || []);
+      expect(
+        errorString.includes("DepositLimitExceeded") || errorString.includes("0x177b") || errorString.includes("6011")
+      ).to.be.true;
     }
 
     // Restore limit
