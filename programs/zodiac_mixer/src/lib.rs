@@ -64,7 +64,7 @@ pub mod zodiac_mixer {
         let global_config = &mut ctx.accounts.global_config;
         global_config.authority = ctx.accounts.authority.key();
         global_config.deposit_fee_rate = 0;     // 0% - Free deposits
-        global_config.withdrawal_fee_rate = 25;  // 0.25% (25 basis points)
+        global_config.withdrawal_fee_rate = 35;  // 0.35% (35 basis points)
         global_config.fee_error_margin = 500;    // 5% (500 basis points)
         global_config.paused = false;
         global_config.bump = ctx.bumps.global_config;
