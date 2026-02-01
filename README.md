@@ -64,17 +64,25 @@ Ephemeral wallet --> Zodiac vault (Arcium computes user's share)
 | Meteora DAMM v2 | Liquidity pool integration |
 | Arcis circuits | MPC computation definitions |
 
+## Repositories
+
+| Repo | Description |
+|------|-------------|
+| [zodiac-liquidity](https://github.com/outsmartchad/zodiac-liquidity) (this repo) | On-chain programs, MPC circuits, and tests |
+| [zodiac-relayer](https://github.com/outsmartchad/zodiac-relayer) | Relay service for ZK mixer withdrawals (100 unit tests) |
+
 ## Project Structure
 
 ```
 zodiac-liquidity/
 ├── programs/
 │   ├── zodiac_liquidity/          # Anchor program (Arcium MPC + Meteora CPI)
-│   └── zodiac_mixer/              # ZK Mixer program (Phase 2, scaffolded)
+│   └── zodiac_mixer/              # ZK Mixer program (Groth16, Merkle tree, SOL/SPL, pause)
 ├── encrypted-ixs/                 # Arcis MPC circuits (8 circuits)
 ├── tests/
 │   ├── zodiac-liquidity.ts        # Happy-path unit tests (14 tests)
 │   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (7 tests)
+│   ├── zodiac-mixer.ts            # Mixer tests — SOL + SPL (25 tests)
 │   └── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests)
 ├── scripts/                       # Utility scripts (cleanup, analysis)
 └── build/                         # Compiled circuits (.arcis, .hash)
@@ -82,16 +90,18 @@ zodiac-liquidity/
 
 ## Program IDs
 
-| Network | Program ID |
-|---------|-----------|
-| Devnet | `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` |
+| Program | Network | Program ID |
+|---------|---------|-----------|
+| zodiac_liquidity | Devnet | `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` |
+| zodiac_mixer | Devnet | `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` |
 
 ## Test Status
 
 | Environment | Tests | Status |
 |-------------|-------|--------|
-| Localnet | 41/41 (14 happy-path + 7 fail + 20 integration) | Passing |
-| Devnet | 37/37 (3-user sequential integration) | Passing |
+| Localnet | 62/62 (25 mixer + 37 integration) | Passing |
+| Devnet | 25/25 mixer (17 SOL + 8 SPL) | Passing |
+| Devnet | 37/37 integration (3-user sequential) | Passing |
 
 ## Full Transaction Flow (13 Steps)
 
