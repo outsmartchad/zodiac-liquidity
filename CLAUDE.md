@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 41/41 passing (21 unit + 20 integration), Devnet 37/37 passing (3-user sequential integration). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery.
+**Phase:** Localnet 54/54 passing (17 mixer + 37 integration), Devnet 37/37 passing (3-user sequential integration). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening.
 
 **Current Program ID (devnet):** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
 **Localnet Program ID:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
@@ -50,6 +50,17 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Fixed (2026-01-31):** `CreateVault` struct field ordering — `quote_mint` must come AFTER `vault` to avoid PDA seed misread. Anchor's `init_if_needed` + PDA seeds resolution shifts account positions when extra accounts are between the seed source and PDA account.
 - **Devnet (2026-01-31):** Fresh deploy to `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`. 37/37 devnet integration tests passing (3-user sequential flow: User1 5M, User2 3M, User3 2M; User2 mid-flow withdrawal; User1+User3 final withdrawal).
 - **Changed (2026-01-31):** Integration test rewritten for multi-user sequential flow — 3 independent users deposit/withdraw in sequence with mid-flow partial withdrawal. Replaced single-user 20-test flow with 37-test 3-user flow.
+- **Added (2026-01-31):** ZK Mixer security hardening (Phase 2A/2B):
+  - `toggle_pause` instruction — authority-gated pause/unpause mechanism. `transact` and `transact_spl` check `global_config.paused` before processing.
+  - `DuplicateNullifier` defense-in-depth check — prevents same nullifier in both input positions within a single tx.
+  - `EncryptedOutputTooLarge` validation — `MAX_ENCRYPTED_OUTPUT_SIZE = 256` enforced on both encrypted outputs.
+  - Fee overflow fix — replaced 4 silent `as u64` casts in `validate_fee` with `try_into().map_err()`.
+  - `fee_recipient_ata` in `TransactSpl` changed from `UncheckedAccount` to `Box<Account<TokenAccount>>` with `token::mint = mint` constraint.
+  - Restored all comments stripped during privacy-cash copy (nullifier cross-check mechanism, reentrancy protection, signer role, rent griefing, NullifierAccount struct docs).
+  - Added endianness comment explaining `from_le_bytes_mod_order` vs `from_be_bytes_mod_order`.
+- **Changed (2026-01-31):** Mixer tests expanded 12→17 tests. Added: oversized encrypted output, pause/unpause, unauthorized pause, cross-check double-spend verification. All existing fail tests tightened from bare try/catch to specific error code assertions.
+- **Fixed (2026-01-31):** `sendAndConfirmVersionedTransaction` in `tests/lib/test_alt.ts` now has blockhash retry logic (up to 3 retries with 2s delay). Fixes transient "Blockhash not found" failures in mixer tests on localnet.
+- **Localnet (2026-01-31):** 54/54 passing (17 mixer + 37 integration).
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -65,7 +76,7 @@ The `.idarc` circuit descriptor shows `Shared` parameters require BOTH `arcis_x2
 | Phase | Description | Status |
 |-------|-------------|--------|
 | **Phase 1** | Zodiac Program (Arcium MPC + Meteora CPI + Relay PDA) | **COMPLETE** (41 localnet + 37 devnet) |
-| **Phase 2** | ZK Mixer Program (scaffolded in `privacy-cash/`) | Not implemented |
+| **Phase 2** | ZK Mixer Program (Groth16 + Merkle tree + SOL/SPL) | **Security hardened** (17 localnet tests). Pause, overflow fix, output validation, fee ATA constraint, comments restored. |
 | **Phase 3** | Client SDK (TypeScript library for frontend integration) | Not started |
 | **Phase 4** | Relayer Service (off-chain service for mixer withdraw proofs) | Not started |
 
@@ -367,9 +378,14 @@ The callback server handles MPC outputs that exceed Solana's ~1KB transaction li
 |------|---------|
 | `encrypted-ixs/src/lib.rs` | Arcis MPC circuits |
 | `programs/zodiac_liquidity/src/lib.rs` | Anchor + Arcium program |
+| `programs/zodiac_mixer/src/lib.rs` | ZK Mixer program (Groth16, Merkle tree, SOL/SPL, pause) |
+| `programs/zodiac_mixer/src/utils.rs` | Mixer utils (proof verification, fee validation, ext_data_hash) |
+| `programs/zodiac_mixer/src/errors.rs` | Groth16 error types |
 | `tests/zodiac-liquidity.ts` | Happy-path unit tests (14 tests) |
 | `tests/zodiac-liquidity-fail.ts` | Fail/auth unit tests (7 tests) |
-| `tests/zodiac-mpc-meteora-integration.ts` | End-to-end integration test — full 13-step privacy flow (20 tests) |
+| `tests/zodiac-mixer.ts` | Mixer tests — deposits, withdrawals, double-spend, pause, auth (17 tests) |
+| `tests/zodiac-mpc-meteora-integration.ts` | End-to-end integration test — full 13-step privacy flow (37 tests) |
+| `tests/lib/test_alt.ts` | Address Lookup Table + versioned tx helpers (with blockhash retry) |
 | `build/*.arcis` | Compiled circuit files |
 | `build/*.hash` | Circuit hashes (used by `circuit_hash!` macro) |
 | `build/*.idarc` | Circuit input/output descriptors (use to verify ArgBuilder) |
@@ -479,6 +495,52 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 | Arcium Voting | `/root/examples/voting/` | State accumulation pattern |
 | Arcium Examples | `/root/examples/` | MPC patterns |
 
+## ZK Mixer (zodiac_mixer)
+
+### Mixer Program ID
+**Localnet/Devnet:** `H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23`
+
+### Mixer Instructions
+
+| Instruction | Purpose |
+|------------|---------|
+| `initialize` | Create SOL merkle tree + tree_token PDA + global_config |
+| `initialize_tree_account_for_spl_token` | Create SPL token merkle tree |
+| `transact` | SOL deposit/withdrawal with Groth16 ZK proof |
+| `transact_spl` | SPL token deposit/withdrawal with Groth16 ZK proof |
+| `update_deposit_limit` | Change max deposit amount (authority-gated) |
+| `update_deposit_limit_for_spl_token` | Change SPL max deposit (authority-gated) |
+| `update_global_config` | Update fee rates and error margin (authority-gated) |
+| `toggle_pause` | Pause/unpause the mixer (authority-gated) |
+
+### Mixer Account Types
+
+| Account | Seeds | Purpose |
+|---------|-------|---------|
+| `MerkleTreeAccount` | `[b"merkle_tree"]` (SOL) or `[b"merkle_tree", mint]` (SPL) | Merkle tree state (height 26, 100-root history) |
+| `TreeTokenAccount` | `[b"tree_token"]` | SOL pool PDA |
+| `GlobalConfig` | `[b"global_config"]` | Fee rates, pause state, authority |
+| `NullifierAccount` | `[b"nullifier0/1", nullifier_bytes]` | Double-spend prevention |
+
+### Mixer Security Features
+
+- **Double-spend prevention:** 4-nullifier cross-check pattern (nullifier0/1 `init` + nullifier2/3 `SystemAccount` ownership check)
+- **DuplicateNullifier check:** Defense-in-depth against same nullifier in both input positions
+- **Pause mechanism:** `toggle_pause` authority-gated, checked at top of `transact`/`transact_spl`
+- **Encrypted output size limit:** `MAX_ENCRYPTED_OUTPUT_SIZE = 256` bytes
+- **Fee overflow protection:** All u128→u64 casts use `try_into()` instead of `as u64`
+- **Fee recipient ATA validation:** SPL path validates `token::mint = mint` on `fee_recipient_ata`
+- **Reentrancy protection:** Nullifier `init` checked by Anchor before any transfers
+- **Ext data hash binding:** Recipient and fee recipient bound to proof via ext_data_hash
+
+### Mixer Fee Configuration
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `deposit_fee_rate` | 0 (0%) | Basis points charged on deposits |
+| `withdrawal_fee_rate` | 25 (0.25%) | Basis points charged on withdrawals |
+| `fee_error_margin` | 500 (5%) | Tolerance for fee amount (min = 95% of expected) |
+
 ## Security Considerations
 
 1. **Cerberus only** - Never use Manticore for DeFi
@@ -486,6 +548,8 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 3. **MXE state** - Use `Enc<Mxe, T>` for protocol state
 4. **Protocol PDA** - Deploys to Meteora, not user wallets
 5. **Viewing keys** - Support compliance/audit access (future)
+6. **Mixer pause** - Authority can halt mixer operations in case of exploit discovery
+7. **Nullifier cross-check** - 4-account pattern prevents all forms of double-spend (same position, swapped position, same nullifier both positions)
 
 ## Lessons Learned
 
@@ -508,7 +572,7 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 17. **Blockhash retry patch** - On localnet, after heavy MPC activity (8 comp defs + 8 computations), the validator lags and blockhashes expire between fetch and confirmation. The test file patches `provider.sendAndConfirm` to auto-retry up to 3 times on "Blockhash not found" errors with a 2s delay. This covers all `.rpc()` calls since Anchor routes them through `provider.sendAndConfirm`. Eliminated all transient blockhash failures.
 18. **SOL-paired pools** - Meteora DAMM v2 pools should use NATIVE_MINT (WSOL) as one of the token pair. Fund relay WSOL accounts by transferring SOL + `createSyncNativeInstruction()` instead of `mintTo` + `fundRelay`. The on-chain `deposit_to_meteora_damm_v2` has built-in SOL wrapping via `sol_amount` parameter.
 19. **ARX node Docker image version must match Arcium SDK** - See dedicated section below: "ARX Node Version Mismatch (AccountDidNotDeserialize)".
-20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 14 tests), `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 7 tests), and `tests/zodiac-mpc-meteora-integration.ts` (end-to-end integration, 20 tests). Total: 41 tests. Comp def inits + vault/position creation are in `before()` hooks for unit tests (only integration test has them as individual `it()` tests). The Anchor.toml script runs all three. To run only one file, temporarily edit the `[scripts] test` line in Anchor.toml to list just one file.
+20. **Test file split** - Tests are split into `tests/zodiac-liquidity.ts` (happy-path, 14 tests), `tests/zodiac-liquidity-fail.ts` (fail/auth tests, 7 tests), `tests/zodiac-mixer.ts` (mixer tests, 17 tests), and `tests/zodiac-mpc-meteora-integration.ts` (end-to-end integration, 37 tests). Total: 54 tests (localnet). Comp def inits + vault/position creation are in `before()` hooks for unit tests (only integration test has them as individual `it()` tests). The Anchor.toml script runs mixer + integration tests. To run only one file, temporarily edit the `[scripts] test` line in Anchor.toml to list just one file.
 21. **Anchor `.rpc()` adds provider wallet as co-signer** - `program.methods.xxx().signers([ephKp]).rpc()` always adds the provider wallet (authority) as a 3rd signer via `provider.wallet.signTransaction()`. To send transactions signed only by ephemeral keypairs, use `.transaction()` + manual `tx.feePayer = ephKp.publicKey` + `connection.sendRawTransaction()`. The `sendWithEphemeralPayer()` helper in both test files handles this with blockhash retry logic. This also applies to `teardownEphemeralWallet` — the SOL return transfer must use the ephemeral wallet as fee payer, not `provider.sendAndConfirm`.
 22. **Anchor events use camelCase names** - `program.coder.events.decode()` returns event names in camelCase (`withdrawEvent`, `pendingDepositsRevealedEvent`), not PascalCase. When matching events from callback tx logs, check both cases or use lowercase comparison.
 23. **Meteora liquidity u128 vs record_liquidity u64** - Meteora's `Position.unlocked_liquidity` is u128 and the SDK's `getLiquidityDelta()` also returns u128-scale values (e.g., `922337203900229981650001879` for a 50M token deposit). The on-chain `record_liquidity` instruction takes `u64`, so values must be capped. This is a known design limitation.
@@ -520,6 +584,10 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 29. **Relay PDA needs sufficient SOL for Meteora pool creation** - The relay PDA is the `payer` in the Meteora CPI for pool creation. A DAMM v2 pool account is ~1112 bytes (~8.5M lamports rent) plus position, NFT, and token vault accounts. Fund the relay PDA with at least 0.5 SOL for pool creation. Insufficient SOL causes `custom program error: 0x1` (InsufficientFunds from SPL Token).
 30. **Relayer SOL budget across test sections** - Multiple Meteora CPI test sections (pool creation, position, deposit/withdraw) each fund their own relay PDA from the relayer wallet. Budget the relayer with enough SOL for ALL sections combined (currently ~7 SOL for 3 sections × 2 SOL relay PDA + 0.1 SOL WSOL each).
 31. **Relay PDA SOL recovery** - After Meteora operations, relay PDAs retain ~2 SOL of rent. Use `withdraw_relay_sol` to reclaim this. Also use `close_relay_token_account` (after draining tokens via `relay_transfer_to_destination`) to reclaim token account rent (~0.002 SOL each). All three test `after()` hooks now do this automatically.
+32. **Mixer `GlobalConfig` changed — requires fresh deploy** - Adding `paused: bool` to `GlobalConfig` changes the account size. Any existing on-chain `GlobalConfig` will fail to deserialize. Must redeploy and re-initialize on devnet. The `Initialize` instruction uses `space = 8 + std::mem::size_of::<GlobalConfig>()` which auto-adjusts.
+33. **`Box<Account<>>` for stack-heavy structs** - `TransactSpl` exceeded the 4096-byte stack limit after changing `fee_recipient_ata` from `UncheckedAccount` to `Account<TokenAccount>`. Wrapping with `Box<Account<'info, TokenAccount>>` moves deserialization to the heap. Common pattern for Anchor account structs with many validated accounts.
+34. **Mixer nullifier cross-check mechanism** - The 4-nullifier pattern (`nullifier0..3`) prevents swapped-position double-spend: `nullifier0/1` use `init` (fail if exists), `nullifier2/3` are `SystemAccount` (fail if already owned by mixer program). This means a nullifier used in position 0 can't later be used in position 1 without tripping the cross-check. The `DuplicateNullifier` check is defense-in-depth for same-nullifier-both-positions within a single tx.
+35. **Versioned transactions need blockhash retry** - Mixer tests use versioned transactions (for Address Lookup Tables). The `sendAndConfirmVersionedTransaction` helper now retries up to 3× on "Blockhash not found" with a 2s delay between attempts. On retry, it fetches a fresh blockhash and re-signs.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 
@@ -649,11 +717,33 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 
 ## Test Results (2026-01-31)
 
-### Localnet (41/41 passing — dual-token redesign)
+### Localnet (54/54 passing — mixer security hardening + integration)
 
-**Program:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` (localnet, via `anchor keys sync`)
+**Programs:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` (zodiac_liquidity), `H4zuwsksYGbfjpFjniuAXqf7ZK7HK854breBZLWgEo23` (zodiac_mixer)
 **ARX nodes:** `arcium/arx-node:v0.6.3` (pinned via `docker tag`)
 **Date:** 2026-01-31
+
+**File: `tests/zodiac-mixer.ts` (17 tests — mixer security hardening)**
+
+| # | Test | Status |
+|---|------|--------|
+| 1 | initializes the mixer correctly | PASS |
+| 2 | deposits SOL with valid ZK proof | PASS |
+| 3 | withdraws SOL with valid ZK proof | PASS |
+| 4 | prevents double-spend attacks via cross-check nullifiers | PASS |
+| 5 | enforces deposit limit | PASS |
+| 6 | updates global config | PASS |
+| 7 | rejects unauthorized deposit limit update | PASS |
+| 8 | rejects unauthorized global config update | PASS |
+| 9 | rejects invalid fee rate (> 10000 basis points) | PASS |
+| 10 | allows a different signer (relayer) to submit a withdrawal proof | PASS |
+| 11 | accepts proof with an old root from the history buffer | PASS |
+| 12 | rejects proof with an unknown root | PASS |
+| 13 | rejects oversized encrypted outputs | PASS |
+| 14 | blocks transactions when mixer is paused | PASS |
+| 15 | resumes operations after unpause | PASS |
+| 16 | rejects non-authority toggle_pause | PASS |
+| 17 | verifies cross-check mechanism prevents swapped-position double-spend | PASS |
 
 **File: `tests/zodiac-liquidity.ts` (14 tests — comp def inits + vault/position creation in `before()` hook)**
 
@@ -686,25 +776,7 @@ docker exec zodiac-dev bash -c "rm -rf /app/.anchor/test-ledger /app/artifacts/*
 | 6 | fails withdraw_from_meteora with unregistered ephemeral wallet | PASS |
 | 7 | fails register with wrong authority | PASS |
 
-**File: `tests/zodiac-mpc-meteora-integration.ts` (20 tests — full 13-step privacy flow with dual tokens)**
-
-| # | Test | Status |
-|---|------|--------|
-| 1-8 | comp def inits (8 circuits) | PASS |
-| 9 | creates vault (MPC) | PASS |
-| 10 | creates user position (MPC) | PASS |
-| 11 | deposits encrypted amount (MPC, 50M base + 50M quote) | PASS |
-| 12 | reveals pending deposits and extracts plaintext amount | PASS |
-| 13 | funds relay with revealed amount (wired from step 12) | PASS |
-| 14 | creates pool and position via relay | PASS |
-| 15 | deposits to Meteora using revealed amount (wired from step 12) | PASS |
-| 16 | records actual liquidity delta from Meteora (wired from step 15) | PASS |
-| 17 | computes withdrawal and decrypts user share (x25519 + RescueCipher) | PASS |
-| 18 | withdraws from Meteora (all unlocked liquidity) | PASS |
-| 19 | transfers tokens from relay to destination (wired from step 17) | PASS |
-| 20 | clears user position (wired from step 17) | PASS |
-
-**Note:** Comp def inits and vault/position creation consolidated into `before()` hooks for unit tests (happy-path + fail). Only the integration test keeps them as individual `it()` tests for visibility.
+**Note:** Comp def inits and vault/position creation consolidated into `before()` hooks for unit tests (happy-path + fail). Only the integration test keeps them as individual `it()` tests for visibility. The `zodiac-liquidity.ts` and `zodiac-liquidity-fail.ts` tests are not currently in the Anchor.toml script — they run when all test files are included.
 
 ### Devnet (37/37 passing — 3-user sequential integration)
 
