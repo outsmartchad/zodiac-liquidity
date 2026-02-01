@@ -16,6 +16,7 @@ pub mod errors;
 use merkle_tree::MerkleTree;
 
 const MERKLE_TREE_HEIGHT: u8 = 26;
+const MAX_ENCRYPTED_OUTPUT_SIZE: usize = 256;
 
 #[cfg(any(feature = "localnet", test))]
 pub const ADMIN_PUBKEY: Option<Pubkey> = None;
@@ -65,6 +66,7 @@ pub mod zodiac_mixer {
         global_config.deposit_fee_rate = 0;     // 0% - Free deposits
         global_config.withdrawal_fee_rate = 25;  // 0.25% (25 basis points)
         global_config.fee_error_margin = 500;    // 5% (500 basis points)
+        global_config.paused = false;
         global_config.bump = ctx.bumps.global_config;
 
         msg!("Zodiac Mixer initialized: height={}, root_history=100, deposit_limit={}",
@@ -102,6 +104,13 @@ pub mod zodiac_mixer {
             global_config.fee_error_margin = margin;
         }
 
+        Ok(())
+    }
+
+    pub fn toggle_pause(ctx: Context<TogglePause>) -> Result<()> {
+        let global_config = &mut ctx.accounts.global_config;
+        global_config.paused = !global_config.paused;
+        msg!("Mixer paused: {}", global_config.paused);
         Ok(())
     }
 
@@ -144,6 +153,9 @@ pub mod zodiac_mixer {
     }
 
     /// Main SOL deposit/withdrawal instruction with Groth16 ZK proof verification.
+    ///
+    /// Reentrant attacks are not possible because nullifier creation is checked
+    /// by Anchor's `init` constraint before any lamport transfers occur.
     pub fn transact(
         ctx: Context<Transact>,
         proof: Proof,
@@ -153,6 +165,26 @@ pub mod zodiac_mixer {
     ) -> Result<()> {
         let tree_account = &mut ctx.accounts.tree_account.load_mut()?;
         let global_config = &ctx.accounts.global_config;
+
+        require!(!global_config.paused, ErrorCode::MixerPaused);
+
+        // Defense-in-depth: prevent same nullifier in both input positions within a single tx.
+        // The cross-check (nullifier2/nullifier3 SystemAccount) already prevents swapped-position
+        // double-spend across transactions, but this catches the degenerate case within one tx.
+        require!(
+            proof.input_nullifiers[0] != proof.input_nullifiers[1],
+            ErrorCode::DuplicateNullifier
+        );
+
+        // Validate encrypted output sizes to prevent excessive on-chain data
+        require!(
+            encrypted_output1.len() <= MAX_ENCRYPTED_OUTPUT_SIZE,
+            ErrorCode::EncryptedOutputTooLarge
+        );
+        require!(
+            encrypted_output2.len() <= MAX_ENCRYPTED_OUTPUT_SIZE,
+            ErrorCode::EncryptedOutputTooLarge
+        );
 
         let ext_data = ExtData::from_minified(&ctx, ext_data_minified);
 
@@ -171,6 +203,9 @@ pub mod zodiac_mixer {
             ext_data.mint_address,
         )?;
 
+        // Endianness note: `calculated_ext_data_hash` is produced by SHA-256 on-chain (LE convention),
+        // while `proof.ext_data_hash` comes from the ZK circuit which uses BE (circom's bits2num).
+        // `from_le_bytes_mod_order` and `from_be_bytes_mod_order` normalize both to the same field element.
         require!(
             Fr::from_le_bytes_mod_order(&calculated_ext_data_hash) == Fr::from_be_bytes_mod_order(&proof.ext_data_hash),
             ErrorCode::ExtDataHashMismatch
@@ -295,6 +330,9 @@ pub mod zodiac_mixer {
     }
 
     /// SPL token deposit/withdrawal with Groth16 ZK proof verification.
+    ///
+    /// Reentrant attacks are not possible because nullifier creation is checked
+    /// by Anchor's `init` constraint before any token transfers occur.
     pub fn transact_spl(
         ctx: Context<TransactSpl>,
         proof: Proof,
@@ -304,6 +342,22 @@ pub mod zodiac_mixer {
     ) -> Result<()> {
         let tree_account = &mut ctx.accounts.tree_account.load_mut()?;
         let global_config = &ctx.accounts.global_config;
+
+        require!(!global_config.paused, ErrorCode::MixerPaused);
+
+        require!(
+            proof.input_nullifiers[0] != proof.input_nullifiers[1],
+            ErrorCode::DuplicateNullifier
+        );
+
+        require!(
+            encrypted_output1.len() <= MAX_ENCRYPTED_OUTPUT_SIZE,
+            ErrorCode::EncryptedOutputTooLarge
+        );
+        require!(
+            encrypted_output2.len() <= MAX_ENCRYPTED_OUTPUT_SIZE,
+            ErrorCode::EncryptedOutputTooLarge
+        );
 
         require!(
             ctx.accounts.signer_token_account.owner == ctx.accounts.signer.key(),
@@ -336,6 +390,7 @@ pub mod zodiac_mixer {
             ext_data.mint_address,
         )?;
 
+        // Endianness note: see transact() for explanation of LE vs BE conversion.
         require!(
             Fr::from_le_bytes_mod_order(&calculated_ext_data_hash) == Fr::from_be_bytes_mod_order(&proof.ext_data_hash),
             ErrorCode::ExtDataHashMismatch
@@ -527,6 +582,9 @@ pub struct Transact<'info> {
     )]
     pub tree_account: AccountLoader<'info, MerkleTreeAccount>,
 
+    /// Nullifier account to mark the first input as spent.
+    /// Using `init` (not `init_if_needed`) ensures the tx fails automatically with a
+    /// system program error if this nullifier was already used (account already exists).
     #[account(
         init,
         payer = signer,
@@ -536,6 +594,8 @@ pub struct Transact<'info> {
     )]
     pub nullifier0: Account<'info, NullifierAccount>,
 
+    /// Nullifier account to mark the second input as spent.
+    /// Same `init` guarantee as nullifier0.
     #[account(
         init,
         payer = signer,
@@ -545,12 +605,18 @@ pub struct Transact<'info> {
     )]
     pub nullifier1: Account<'info, NullifierAccount>,
 
+    /// Cross-check: seeds use nullifier0 prefix with input[1]'s value.
+    /// If input[1] was previously spent in position 0, this PDA was already `init`'d as a
+    /// NullifierAccount (owned by the mixer program). The `SystemAccount` constraint requires
+    /// `owner == system_program::ID`, which fails → prevents swapped-position double-spend.
     #[account(
         seeds = [b"nullifier0", proof.input_nullifiers[1].as_ref()],
         bump
     )]
     pub nullifier2: SystemAccount<'info>,
 
+    /// Cross-check: seeds use nullifier1 prefix with input[0]'s value.
+    /// Mirror of nullifier2 — prevents the reverse swap.
     #[account(
         seeds = [b"nullifier1", proof.input_nullifiers[0].as_ref()],
         bump
@@ -570,14 +636,18 @@ pub struct Transact<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
+    /// CHECK: user should be able to send funds to any types of accounts.
+    /// The recipient is bound to the proof via ext_data_hash — changing it invalidates the proof.
     #[account(mut)]
-    /// CHECK: user should be able to send funds to any types of accounts
     pub recipient: UncheckedAccount<'info>,
 
+    /// CHECK: user should be able to send fees to any types of accounts.
+    /// The fee recipient is bound to the proof via ext_data_hash.
     #[account(mut)]
-    /// CHECK: user should be able to send fees to any types of accounts
     pub fee_recipient_account: UncheckedAccount<'info>,
 
+    /// The account signing the transaction. Can be the user or a relayer.
+    /// The signer is NOT bound to the proof — anyone can submit a valid proof on behalf of the user.
     #[account(mut)]
     pub signer: Signer<'info>,
 
@@ -594,6 +664,7 @@ pub struct TransactSpl<'info> {
     )]
     pub tree_account: AccountLoader<'info, MerkleTreeAccount>,
 
+    /// See Transact::nullifier0 for documentation on the cross-check pattern.
     #[account(
         init,
         payer = signer,
@@ -603,6 +674,7 @@ pub struct TransactSpl<'info> {
     )]
     pub nullifier0: Account<'info, NullifierAccount>,
 
+    /// See Transact::nullifier1.
     #[account(
         init,
         payer = signer,
@@ -612,12 +684,14 @@ pub struct TransactSpl<'info> {
     )]
     pub nullifier1: Account<'info, NullifierAccount>,
 
+    /// Cross-check: prevents swapped-position double-spend. See Transact::nullifier2.
     #[account(
         seeds = [b"nullifier0", proof.input_nullifiers[1].as_ref()],
         bump
     )]
     pub nullifier2: SystemAccount<'info>,
 
+    /// Cross-check: mirror of nullifier2. See Transact::nullifier3.
     #[account(
         seeds = [b"nullifier1", proof.input_nullifiers[0].as_ref()],
         bump
@@ -630,6 +704,7 @@ pub struct TransactSpl<'info> {
     )]
     pub global_config: Account<'info, GlobalConfig>,
 
+    /// The account signing the transaction. Can be the user or a relayer.
     #[account(mut)]
     pub signer: Signer<'info>,
 
@@ -638,9 +713,13 @@ pub struct TransactSpl<'info> {
     #[account(mut)]
     pub signer_token_account: Account<'info, TokenAccount>,
 
-    /// CHECK: user should be able to send funds to any types of accounts
+    /// CHECK: user should be able to send funds to any types of accounts.
+    /// The recipient is bound to the proof via ext_data_hash.
     pub recipient: UncheckedAccount<'info>,
 
+    /// Recipient's token account (destination for withdrawals).
+    /// It's the relayer's job to account for the rent of this account to prevent
+    /// rent griefing attacks. Relayer adds an instruction to init the account.
     #[account(
         mut,
         token::mint = mint,
@@ -648,6 +727,8 @@ pub struct TransactSpl<'info> {
     )]
     pub recipient_token_account: Account<'info, TokenAccount>,
 
+    /// Tree's associated token account (destination for deposits, source for withdrawals).
+    /// Created automatically if it doesn't exist via `init_if_needed`.
     #[account(
         init_if_needed,
         payer = signer,
@@ -656,9 +737,13 @@ pub struct TransactSpl<'info> {
     )]
     pub tree_ata: Account<'info, TokenAccount>,
 
-    /// CHECK: Validated in instruction logic
-    #[account(mut)]
-    pub fee_recipient_ata: UncheckedAccount<'info>,
+    /// Fee recipient's token account. Validated to match the correct mint.
+    /// Boxed to reduce stack frame size in `try_accounts`.
+    #[account(
+        mut,
+        token::mint = mint
+    )]
+    pub fee_recipient_ata: Box<Account<'info, TokenAccount>>,
 
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -727,6 +812,19 @@ pub struct UpdateGlobalConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct TogglePause<'info> {
+    #[account(
+        mut,
+        seeds = [b"global_config"],
+        bump = global_config.bump,
+        has_one = authority @ ErrorCode::Unauthorized
+    )]
+    pub global_config: Account<'info, GlobalConfig>,
+
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
 pub struct InitializeTreeAccountForSplToken<'info> {
     #[account(
         init,
@@ -782,9 +880,13 @@ pub struct GlobalConfig {
     pub deposit_fee_rate: u16,
     pub withdrawal_fee_rate: u16,
     pub fee_error_margin: u16,
+    pub paused: bool,
     pub bump: u8,
 }
 
+/// This account's existence indicates that the nullifier has been used.
+/// No data fields needed other than bump for PDA verification.
+/// The `init` constraint in Transact/TransactSpl prevents re-creation.
 #[account]
 pub struct NullifierAccount {
     pub bump: u8,
@@ -802,6 +904,7 @@ pub struct MerkleTreeAccount {
     pub height: u8,
     pub root_history_size: u8,
     pub bump: u8,
+    /// Padding required by `#[account(zero_copy)]` for 8-byte alignment.
     pub _padding: [u8; 5],
 }
 
@@ -851,4 +954,10 @@ pub enum ErrorCode {
     InvalidMintAddress,
     #[msg("Invalid token account mint address")]
     InvalidTokenAccountMintAddress,
+    #[msg("Duplicate nullifier in both input positions")]
+    DuplicateNullifier,
+    #[msg("Encrypted output exceeds maximum allowed size")]
+    EncryptedOutputTooLarge,
+    #[msg("Mixer is paused")]
+    MixerPaused,
 }

@@ -196,24 +196,43 @@ export async function createVersionedTransactionWithALT(
 export async function sendAndConfirmVersionedTransaction(
   connection: Connection,
   transaction: VersionedTransaction,
-  signers: Keypair[]
+  signers: Keypair[],
+  maxRetries: number = 3,
 ): Promise<string> {
-  transaction.sign(signers);
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Re-sign with fresh blockhash on each attempt
+      if (attempt > 1) {
+        const freshBlockhash = await connection.getLatestBlockhash();
+        transaction.message.recentBlockhash = freshBlockhash.blockhash;
+      }
 
-  const signature = await connection.sendTransaction(transaction, {
-    skipPreflight: false,
-    preflightCommitment: 'confirmed',
-  });
+      transaction.sign(signers);
 
-  const latestBlockHash = await connection.getLatestBlockhash();
+      const signature = await connection.sendTransaction(transaction, {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
 
-  await connection.confirmTransaction({
-    blockhash: latestBlockHash.blockhash,
-    lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
-    signature: signature,
-  });
+      const latestBlockHash = await connection.getLatestBlockhash();
 
-  return signature;
+      await connection.confirmTransaction({
+        blockhash: latestBlockHash.blockhash,
+        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+        signature: signature,
+      });
+
+      return signature;
+    } catch (error: any) {
+      const msg = error?.message || error?.toString() || '';
+      if (msg.includes('Blockhash not found') && attempt < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error('sendAndConfirmVersionedTransaction: max retries exhausted');
 }
 
 export function getGlobalTestALT(): PublicKey {

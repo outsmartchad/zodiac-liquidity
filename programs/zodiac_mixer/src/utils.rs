@@ -117,20 +117,24 @@ pub fn validate_fee(
     fee_error_margin: u16,
 ) -> Result<()> {
     if ext_amount > 0 {
-        let expected_fee = (ext_amount as u128)
+        let expected_fee: u64 = (ext_amount as u128)
             .checked_mul(deposit_fee_rate as u128)
             .ok_or(ErrorCode::ArithmeticOverflow)?
             .checked_div(10000)
-            .ok_or(ErrorCode::ArithmeticOverflow)? as u64;
+            .ok_or(ErrorCode::ArithmeticOverflow)?
+            .try_into()
+            .map_err(|_| ErrorCode::ArithmeticOverflow)?;
 
-        let min_acceptable_fee = if expected_fee > 0 {
+        let min_acceptable_fee: u64 = if expected_fee > 0 {
             let error_multiplier = 10000u128.checked_sub(fee_error_margin as u128)
                 .ok_or(ErrorCode::ArithmeticOverflow)?;
             (expected_fee as u128)
                 .checked_mul(error_multiplier)
                 .ok_or(ErrorCode::ArithmeticOverflow)?
                 .checked_div(10000)
-                .ok_or(ErrorCode::ArithmeticOverflow)? as u64
+                .ok_or(ErrorCode::ArithmeticOverflow)?
+                .try_into()
+                .map_err(|_| ErrorCode::ArithmeticOverflow)?
         } else {
             0
         };
@@ -140,23 +144,29 @@ pub fn validate_fee(
             ErrorCode::InvalidFeeAmount
         );
     } else if ext_amount < 0 {
-        let withdrawal_amount = ext_amount.checked_neg()
-            .ok_or(ErrorCode::ArithmeticOverflow)? as u64;
+        let withdrawal_amount: u64 = ext_amount.checked_neg()
+            .ok_or(ErrorCode::ArithmeticOverflow)?
+            .try_into()
+            .map_err(|_| ErrorCode::ArithmeticOverflow)?;
 
-        let expected_fee = (withdrawal_amount as u128)
+        let expected_fee: u64 = (withdrawal_amount as u128)
             .checked_mul(withdrawal_fee_rate as u128)
             .ok_or(ErrorCode::ArithmeticOverflow)?
             .checked_div(10000)
-            .ok_or(ErrorCode::ArithmeticOverflow)? as u64;
+            .ok_or(ErrorCode::ArithmeticOverflow)?
+            .try_into()
+            .map_err(|_| ErrorCode::ArithmeticOverflow)?;
 
-        let min_acceptable_fee = if expected_fee > 0 {
+        let min_acceptable_fee: u64 = if expected_fee > 0 {
             let error_multiplier = 10000u128.checked_sub(fee_error_margin as u128)
                 .ok_or(ErrorCode::ArithmeticOverflow)?;
             (expected_fee as u128)
                 .checked_mul(error_multiplier)
                 .ok_or(ErrorCode::ArithmeticOverflow)?
                 .checked_div(10000)
-                .ok_or(ErrorCode::ArithmeticOverflow)? as u64
+                .ok_or(ErrorCode::ArithmeticOverflow)?
+                .try_into()
+                .map_err(|_| ErrorCode::ArithmeticOverflow)?
         } else {
             0
         };

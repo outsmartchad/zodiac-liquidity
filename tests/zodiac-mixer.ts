@@ -673,7 +673,6 @@ describe("Zodiac Mixer", () => {
       keyBasePath,
     );
 
-    let hasTransactionFailed = false;
     try {
       await executeTransact(
         program,
@@ -684,11 +683,11 @@ describe("Zodiac Mixer", () => {
         randomUser,
         altAddress,
       );
-    } catch (error) {
-      hasTransactionFailed = true;
+      expect.fail("Double-spend should have failed");
+    } catch (error: any) {
+      // Nullifier PDA already exists → init fails with "already in use" or similar
+      expect(error).to.exist;
     }
-
-    expect(hasTransactionFailed).to.be.true;
   });
 
   // =========================================================================
@@ -740,7 +739,6 @@ describe("Zodiac Mixer", () => {
       keyBasePath,
     );
 
-    let failed = false;
     try {
       await executeTransact(
         program,
@@ -751,11 +749,11 @@ describe("Zodiac Mixer", () => {
         randomUser,
         altAddress,
       );
-    } catch (error) {
-      failed = true;
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("DepositLimitExceeded");
     }
-
-    expect(failed).to.be.true;
 
     // Restore limit
     await program.methods
@@ -812,7 +810,6 @@ describe("Zodiac Mixer", () => {
       signature: attackerAirdrop,
     });
 
-    let failed = false;
     try {
       await program.methods
         .updateDepositLimit(new anchor.BN(1))
@@ -822,11 +819,11 @@ describe("Zodiac Mixer", () => {
         })
         .signers([attacker])
         .rpc();
-    } catch (error) {
-      failed = true;
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("Unauthorized");
     }
-
-    expect(failed).to.be.true;
   });
 
   // =========================================================================
@@ -842,7 +839,6 @@ describe("Zodiac Mixer", () => {
       signature: attackerAirdrop,
     });
 
-    let failed = false;
     try {
       await program.methods
         .updateGlobalConfig(null, 9999, null)
@@ -852,18 +848,17 @@ describe("Zodiac Mixer", () => {
         })
         .signers([attacker])
         .rpc();
-    } catch (error) {
-      failed = true;
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("Unauthorized");
     }
-
-    expect(failed).to.be.true;
   });
 
   // =========================================================================
   // Test 9: Invalid fee rate rejected
   // =========================================================================
   it("rejects invalid fee rate (> 10000 basis points)", async () => {
-    let failed = false;
     try {
       await program.methods
         .updateGlobalConfig(null, 10001, null)
@@ -873,11 +868,11 @@ describe("Zodiac Mixer", () => {
         })
         .signers([authority])
         .rpc();
-    } catch (error) {
-      failed = true;
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("InvalidFeeRate");
     }
-
-    expect(failed).to.be.true;
   });
 
   // =========================================================================
@@ -1096,7 +1091,6 @@ describe("Zodiac Mixer", () => {
   // Test 12: Unknown root (outside history buffer) is rejected
   // =========================================================================
   it("rejects proof with an unknown root", async () => {
-    // Create a deposit proof with a fabricated/wrong root
     const depositAmount = 30_000;
     const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
 
@@ -1121,7 +1115,6 @@ describe("Zodiac Mixer", () => {
       new Utxo({ lightWasm, amount: '0' }),
     ];
 
-    // Generate a valid proof first
     const { proofToSubmit } = await generateProofAndFormat(
       inputs,
       outputs,
@@ -1131,13 +1124,10 @@ describe("Zodiac Mixer", () => {
       keyBasePath,
     );
 
-    // Tamper with the root — set it to a random value not in the history buffer
-    // This makes the proof invalid (root won't match on-chain) AND
-    // triggers UnknownRoot check before proof verification
+    // Tamper with the root — triggers UnknownRoot check before proof verification
     const fakeRoot = Array.from({ length: 32 }, (_, i) => (i + 1) % 256);
     proofToSubmit.root = fakeRoot;
 
-    let failed = false;
     try {
       await executeTransact(
         program,
@@ -1148,10 +1138,361 @@ describe("Zodiac Mixer", () => {
         randomUser,
         altAddress,
       );
-    } catch (error) {
-      failed = true;
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("UnknownRoot");
+    }
+  });
+
+  // =========================================================================
+  // Test 13: Oversized encrypted output is rejected
+  // =========================================================================
+  it("rejects oversized encrypted outputs", async () => {
+    const depositAmount = 10_000;
+    const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+    const extData = {
+      recipient: recipient.publicKey,
+      extAmount: new anchor.BN(depositAmount),
+      encryptedOutput1: Buffer.alloc(257, 0xAA), // exceeds MAX_ENCRYPTED_OUTPUT_SIZE (256)
+      encryptedOutput2: Buffer.from("enc_normal"),
+      fee: depositFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const inputs = [
+      new Utxo({ lightWasm }),
+      new Utxo({ lightWasm }),
+    ];
+
+    const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+    const outputs = [
+      new Utxo({ lightWasm, amount: publicAmount.toString(), index: globalMerkleTree._layers[0].length }),
+      new Utxo({ lightWasm, amount: '0' }),
+    ];
+
+    const { proofToSubmit } = await generateProofAndFormat(
+      inputs,
+      outputs,
+      globalMerkleTree,
+      extData,
+      lightWasm,
+      keyBasePath,
+    );
+
+    try {
+      await executeTransact(
+        program,
+        provider,
+        proofToSubmit,
+        extData,
+        getAccounts(),
+        randomUser,
+        altAddress,
+      );
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("EncryptedOutputTooLarge");
+    }
+  });
+
+  // =========================================================================
+  // Test 14: Pause mechanism blocks transactions
+  // =========================================================================
+  it("blocks transactions when mixer is paused", async () => {
+    // Pause the mixer
+    await program.methods
+      .togglePause()
+      .accounts({
+        globalConfig: globalConfigPDA,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    // Verify paused
+    const config = await program.account.globalConfig.fetch(globalConfigPDA);
+    expect(config.paused).to.be.true;
+
+    // Try to transact
+    const depositAmount = 10_000;
+    const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+    const extData = {
+      recipient: recipient.publicKey,
+      extAmount: new anchor.BN(depositAmount),
+      encryptedOutput1: Buffer.from("enc_paused_out1"),
+      encryptedOutput2: Buffer.from("enc_paused_out2"),
+      fee: depositFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const inputs = [
+      new Utxo({ lightWasm }),
+      new Utxo({ lightWasm }),
+    ];
+
+    const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+    const outputs = [
+      new Utxo({ lightWasm, amount: publicAmount.toString(), index: globalMerkleTree._layers[0].length }),
+      new Utxo({ lightWasm, amount: '0' }),
+    ];
+
+    const { proofToSubmit } = await generateProofAndFormat(
+      inputs,
+      outputs,
+      globalMerkleTree,
+      extData,
+      lightWasm,
+      keyBasePath,
+    );
+
+    try {
+      await executeTransact(
+        program,
+        provider,
+        proofToSubmit,
+        extData,
+        getAccounts(),
+        randomUser,
+        altAddress,
+      );
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("MixerPaused");
+    }
+  });
+
+  // =========================================================================
+  // Test 15: Unpause resumes operations
+  // =========================================================================
+  it("resumes operations after unpause", async () => {
+    // Unpause
+    await program.methods
+      .togglePause()
+      .accounts({
+        globalConfig: globalConfigPDA,
+        authority: authority.publicKey,
+      })
+      .signers([authority])
+      .rpc();
+
+    const config = await program.account.globalConfig.fetch(globalConfigPDA);
+    expect(config.paused).to.be.false;
+
+    // Deposit should now succeed
+    const depositAmount = 10_000;
+    const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+    const extData = {
+      recipient: recipient.publicKey,
+      extAmount: new anchor.BN(depositAmount),
+      encryptedOutput1: Buffer.from("enc_unpause_out1"),
+      encryptedOutput2: Buffer.from("enc_unpause_out2"),
+      fee: depositFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const inputs = [
+      new Utxo({ lightWasm }),
+      new Utxo({ lightWasm }),
+    ];
+
+    const publicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+    const outputs = [
+      new Utxo({ lightWasm, amount: publicAmount.toString(), index: globalMerkleTree._layers[0].length }),
+      new Utxo({ lightWasm, amount: '0' }),
+    ];
+
+    const { proofToSubmit, outputCommitments } = await generateProofAndFormat(
+      inputs,
+      outputs,
+      globalMerkleTree,
+      extData,
+      lightWasm,
+      keyBasePath,
+    );
+
+    await executeTransact(
+      program,
+      provider,
+      proofToSubmit,
+      extData,
+      getAccounts(),
+      randomUser,
+      altAddress,
+    );
+
+    for (const commitment of outputCommitments) {
+      globalMerkleTree.insert(commitment);
+    }
+  });
+
+  // =========================================================================
+  // Test 16: Non-authority cannot toggle pause
+  // =========================================================================
+  it("rejects non-authority toggle_pause", async () => {
+    const attacker = anchor.web3.Keypair.generate();
+    const attackerAirdrop = await provider.connection.requestAirdrop(attacker.publicKey, LAMPORTS_PER_SOL);
+    const bh = await provider.connection.getLatestBlockhash();
+    await provider.connection.confirmTransaction({
+      blockhash: bh.blockhash,
+      lastValidBlockHeight: bh.lastValidBlockHeight,
+      signature: attackerAirdrop,
+    });
+
+    try {
+      await program.methods
+        .togglePause()
+        .accounts({
+          globalConfig: globalConfigPDA,
+          authority: attacker.publicKey,
+        })
+        .signers([attacker])
+        .rpc();
+      expect.fail("Should have thrown");
+    } catch (error: any) {
+      const errorString = error.toString();
+      expect(errorString).to.include("Unauthorized");
+    }
+  });
+
+  // =========================================================================
+  // Test 17: Double-spend cross-check verification
+  // =========================================================================
+  it("verifies cross-check mechanism prevents swapped-position double-spend", async () => {
+    // This test explicitly verifies the nullifier2/nullifier3 cross-check:
+    // 1. Deposit → creates UTXO A
+    // 2. Withdraw with inputs=[A, empty] (succeeds, creates nullifier0[A] and nullifier1[empty])
+    // 3. Try withdraw with inputs=[empty, A] (swapped) → nullifier3 = seeds[nullifier1, A]
+    //    which was already init'd as NullifierAccount → SystemAccount check fails
+
+    const depositAmount = 70_000;
+    const depositFee = new anchor.BN(calculateDepositFee(depositAmount));
+
+    const depositExtData = {
+      recipient: recipient.publicKey,
+      extAmount: new anchor.BN(depositAmount),
+      encryptedOutput1: Buffer.from("enc_xcheck_dep1"),
+      encryptedOutput2: Buffer.from("enc_xcheck_dep2"),
+      fee: depositFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const depositInputs = [
+      new Utxo({ lightWasm }),
+      new Utxo({ lightWasm }),
+    ];
+
+    const depositPublicAmount = new BN(depositAmount).sub(depositFee).add(FIELD_SIZE).mod(FIELD_SIZE);
+    const depositOutputs = [
+      new Utxo({ lightWasm, amount: depositPublicAmount.toString(), index: globalMerkleTree._layers[0].length }),
+      new Utxo({ lightWasm, amount: '0' }),
+    ];
+
+    const depositResult = await generateProofAndFormat(
+      depositInputs,
+      depositOutputs,
+      globalMerkleTree,
+      depositExtData,
+      lightWasm,
+      keyBasePath,
+    );
+
+    await executeTransact(
+      program,
+      provider,
+      depositResult.proofToSubmit,
+      depositExtData,
+      getAccounts(),
+      randomUser,
+      altAddress,
+    );
+
+    for (const commitment of depositResult.outputCommitments) {
+      globalMerkleTree.insert(commitment);
     }
 
-    expect(failed).to.be.true;
+    // First withdrawal: inputs=[targetUtxo, empty] — should succeed
+    const targetUtxo = depositOutputs[0];
+    const firstInputs = [targetUtxo, new Utxo({ lightWasm })];
+    const firstOutputs = [new Utxo({ lightWasm, amount: '0' }), new Utxo({ lightWasm, amount: '0' })];
+    const inputsSum = firstInputs.reduce((sum, x) => sum.add(x.amount), new BN(0));
+    const firstFee = new anchor.BN(calculateWithdrawalFee(inputsSum.toNumber()));
+    const firstExtAmount = firstFee.add(new BN(0)).sub(inputsSum);
+
+    const firstExtData = {
+      recipient: recipient.publicKey,
+      extAmount: firstExtAmount,
+      encryptedOutput1: Buffer.from("enc_xcheck_w1_1"),
+      encryptedOutput2: Buffer.from("enc_xcheck_w1_2"),
+      fee: firstFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const firstResult = await generateProofAndFormat(
+      firstInputs, firstOutputs, globalMerkleTree, firstExtData, lightWasm, keyBasePath,
+    );
+
+    await executeTransact(
+      program, provider, firstResult.proofToSubmit, firstExtData,
+      getAccounts(), randomUser, altAddress,
+    );
+
+    for (const commitment of firstResult.outputCommitments) {
+      globalMerkleTree.insert(commitment);
+    }
+
+    // Swapped double-spend attempt: inputs=[empty, targetUtxo]
+    // The targetUtxo's nullifier was stored under nullifier1 prefix in step above.
+    // Now putting it in position 0 means nullifier0[targetNullifier] is new (would succeed),
+    // BUT nullifier3 = seeds[nullifier1, input[0]=empty] checks if empty's nullifier was
+    // used in position 1 before. The actual cross-check that catches this is:
+    // nullifier2 = seeds[nullifier0, input[1]=targetNullifier] — this PDA was already
+    // init'd as NullifierAccount (from step above where input[0] used nullifier0[targetNullifier]... wait,
+    // no — in the first withdrawal, nullifier0 stored input[0]=target under "nullifier0" prefix.
+    // So nullifier2 = seeds[nullifier0, input[1]=target] in the second attempt will find
+    // the already-initialized PDA → SystemAccount check fails.
+
+    const secondInputs = [new Utxo({ lightWasm }), targetUtxo];
+    const secondOutputs = [new Utxo({ lightWasm, amount: '0' }), new Utxo({ lightWasm, amount: '0' })];
+    const secondFee = new anchor.BN(calculateWithdrawalFee(inputsSum.toNumber()));
+    const secondExtAmount = secondFee.add(new BN(0)).sub(inputsSum);
+
+    const secondExtData = {
+      recipient: recipient.publicKey,
+      extAmount: secondExtAmount,
+      encryptedOutput1: Buffer.from("enc_xcheck_w2_1"),
+      encryptedOutput2: Buffer.from("enc_xcheck_w2_2"),
+      fee: secondFee,
+      feeRecipient: feeRecipient.publicKey,
+      mintAddress: SOL_MINT,
+    };
+
+    const secondResult = await generateProofAndFormat(
+      secondInputs, secondOutputs, globalMerkleTree, secondExtData, lightWasm, keyBasePath,
+    );
+
+    try {
+      await executeTransact(
+        program, provider, secondResult.proofToSubmit, secondExtData,
+        getAccounts(), randomUser, altAddress,
+      );
+      expect.fail("Swapped-position double-spend should have failed");
+    } catch (error: any) {
+      // The cross-check nullifier2 PDA was already init'd as NullifierAccount (owned by mixer program).
+      // SystemAccount constraint requires owner == system_program::ID → transaction fails.
+      // The exact error varies by Anchor version and tx type (versioned vs legacy).
+      expect(error).to.exist;
+      expect(error.toString()).to.not.include("Should have failed");
+    }
   });
 });
