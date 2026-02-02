@@ -60,7 +60,7 @@ Ephemeral wallet --> Zodiac vault (Arcium computes user's share)
 | Component | Purpose |
 |-----------|---------|
 | Anchor 0.32.1 | Solana program framework |
-| Arcium 0.6.3 | Arcium mxe program framework |
+| Arcium 0.6.6 | Arcium mxe program framework |
 | Meteora DAMM v2 | Liquidity pool integration |
 | Arcis circuits | MPC computation definitions |
 
@@ -83,7 +83,8 @@ zodiac-liquidity/
 │   ├── zodiac-liquidity.ts        # Happy-path unit tests (14 tests)
 │   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (7 tests)
 │   ├── zodiac-mixer.ts            # Mixer tests — SOL + SPL (25 tests)
-│   └── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests)
+│   ├── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests)
+│   └── zodiac-full-privacy-integration.ts # Full mixer->zodiac->meteora flow (39 tests)
 ├── scripts/                       # Utility scripts (cleanup, analysis)
 └── build/                         # Compiled circuits (.arcis, .hash)
 ```
@@ -99,6 +100,7 @@ zodiac-liquidity/
 
 | Environment | Tests | Status |
 |-------------|-------|--------|
+| Localnet | 39/39 full privacy integration (mixer + MPC + Meteora) | Passing |
 | Localnet | 62/62 (25 mixer + 37 integration) | Passing |
 | Devnet | 25/25 mixer (17 SOL + 8 SPL) | Passing |
 | Devnet | 37/37 integration (3-user sequential) | Passing |

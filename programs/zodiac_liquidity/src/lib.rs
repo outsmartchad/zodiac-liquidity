@@ -51,7 +51,18 @@ pub mod zodiac_liquidity {
     // ============================================================
     // COMPUTATION DEFINITION INITIALIZERS (one-time setup per circuit)
     // ============================================================
+    //
+    // Each MPC circuit requires a one-time on-chain registration (computation definition)
+    // that stores the circuit's offchain URL and content hash. ARX nodes fetch the circuit
+    // from the URL and verify the hash before executing computations.
+    //
+    // Security: These are permissionless (any payer can call) because the circuit hash is
+    // baked into the program binary via `circuit_hash!()`. A malicious actor cannot register
+    // a different circuit — the hash would not match.
 
+    /// Initializes the computation definition for the `init_vault` MPC circuit.
+    /// @dev One-time setup. Stores the offchain circuit URL and hash for ARX node fetching.
+    /// @dev Permissionless — the circuit hash is verified at computation time by ARX nodes.
     pub fn init_vault_comp_def(ctx: Context<InitVaultCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -64,6 +75,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `init_user_position` MPC circuit.
     pub fn init_user_position_comp_def(ctx: Context<InitUserPositionCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -76,6 +88,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `deposit` MPC circuit.
     pub fn init_deposit_comp_def(ctx: Context<InitDepositCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -88,6 +101,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `reveal_pending_deposits` MPC circuit.
     pub fn init_reveal_pending_comp_def(ctx: Context<InitRevealPendingCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -101,6 +115,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `record_liquidity` MPC circuit.
     pub fn init_record_liquidity_comp_def(ctx: Context<InitRecordLiquidityCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -113,6 +128,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `compute_withdrawal` MPC circuit.
     pub fn init_withdraw_comp_def(ctx: Context<InitWithdrawCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -125,6 +141,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `get_user_position` MPC circuit.
     pub fn init_get_position_comp_def(ctx: Context<InitGetPositionCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -137,6 +154,7 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Initializes the computation definition for the `clear_position` MPC circuit.
     pub fn init_clear_position_comp_def(ctx: Context<InitClearPositionCompDef>) -> Result<()> {
         init_comp_def(
             ctx.accounts,
@@ -153,8 +171,21 @@ pub mod zodiac_liquidity {
     // CREATE VAULT (initializes encrypted vault state)
     // ============================================================
 
-    /// Creates a new privacy vault for a specific token mint.
-    /// Initializes encrypted vault state via MPC.
+    /// Creates a new privacy vault for a specific base token mint.
+    ///
+    /// @dev Initializes the VaultAccount PDA (seeds: [b"vault", token_mint]) and queues
+    ///      an MPC computation to encrypt the initial zero-state vault.
+    /// @dev Uses `init_if_needed` — calling twice with the same mint re-queues MPC but
+    ///      does not create a duplicate vault. The callback overwrites vault_state.
+    ///
+    /// Security invariants:
+    /// - Vault PDA is unique per base token mint (enforced by seeds).
+    /// - Authority is set to the signer — only one authority per vault.
+    /// - No token transfers occur; this is purely state initialization.
+    /// - The MPC callback will set the encrypted vault_state and nonce.
+    ///
+    /// @param computation_offset Random u64 used to derive a unique computation PDA.
+    /// @param nonce Random u128 used as the initial encryption nonce.
     pub fn create_vault(
         ctx: Context<CreateVault>,
         computation_offset: u64,
@@ -179,7 +210,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![InitVaultCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -224,7 +254,19 @@ pub mod zodiac_liquidity {
     // CREATE USER POSITION (initializes encrypted user position)
     // ============================================================
 
-    /// Creates a new user position in the vault.
+    /// Creates a new encrypted user position in the vault.
+    ///
+    /// @dev Initializes UserPositionAccount PDA (seeds: [b"position", vault, user]) and
+    ///      queues an MPC computation to encrypt the initial zero-state position.
+    /// @dev One position per user per vault (enforced by PDA seeds).
+    ///
+    /// Security invariants:
+    /// - Position owner is set to the signer's key.
+    /// - Position is linked to a specific vault.
+    /// - `init_if_needed` allows re-initialization (same concern as create_vault).
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param nonce Random u128 for initial encryption nonce.
     pub fn create_user_position(
         ctx: Context<CreateUserPosition>,
         computation_offset: u64,
@@ -246,7 +288,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![InitUserPositionCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -285,8 +326,29 @@ pub mod zodiac_liquidity {
     // DEPOSIT (adds encrypted amount to vault and user position)
     // ============================================================
 
-    /// Deposits tokens into the vault with encrypted amounts.
-    /// Transfers both base and quote tokens from user to vault, then updates encrypted state.
+    /// Deposits base and quote tokens into the vault with encrypted amount tracking.
+    ///
+    /// @dev Performs two token::transfer CPIs (base + quote) BEFORE queuing the MPC computation.
+    ///      The MPC circuit updates both the vault's pending deposits and the user's position.
+    /// @dev Plaintext amounts (base_amount, quote_amount) are visible on-chain in the transfer.
+    ///      Encrypted amounts are used by MPC to update cumulative encrypted state.
+    ///
+    /// Security invariants:
+    /// - Depositor must own the user position (constraint: user_position.owner == depositor).
+    /// - Token accounts validated: user's accounts must match mint + authority, vault accounts
+    ///   must match mint + vault PDA authority.
+    /// - `vault.has_one = token_mint` ensures correct base mint.
+    /// - `quote_mint` address checked against `vault.quote_mint`.
+    /// - Token transfers happen atomically before MPC queue. If MPC fails, tokens are in the
+    ///   vault but encrypted state is not updated — operator must reconcile.
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param encrypted_base_amount User-encrypted base deposit amount (x25519).
+    /// @param encrypted_quote_amount User-encrypted quote deposit amount (x25519).
+    /// @param encryption_pubkey User's x25519 public key for shared encryption.
+    /// @param amount_nonce Nonce used for the encrypted amounts.
+    /// @param base_amount Plaintext base amount for the token transfer.
+    /// @param quote_amount Plaintext quote amount for the token transfer.
     pub fn deposit(
         ctx: Context<Deposit>,
         computation_offset: u64,
@@ -357,7 +419,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![DepositCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -414,8 +475,19 @@ pub mod zodiac_liquidity {
     // REVEAL PENDING DEPOSITS (for Meteora deployment)
     // ============================================================
 
-    /// Reveals the total pending deposits for deployment to Meteora.
-    /// Only callable by vault authority.
+    /// Reveals the total pending base and quote deposits for deployment to Meteora.
+    ///
+    /// @dev Authority-gated. Decrypts the vault's pending_base and pending_quote via MPC
+    ///      and emits the plaintext aggregates in a PendingDepositsRevealedEvent.
+    /// @dev The revealed amounts are intentionally public — they represent the aggregate
+    ///      of all pending deposits, not individual user amounts.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call (checked: authority.key() == vault.authority).
+    /// - Vault account is read-only in the callback (is_writable: false).
+    /// - Reveals aggregate only — individual user deposits remain encrypted.
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
     pub fn reveal_pending_deposits(
         ctx: Context<RevealPendingDeposits>,
         computation_offset: u64,
@@ -442,7 +514,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![RevealPendingDepositsCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -485,8 +556,22 @@ pub mod zodiac_liquidity {
     // RECORD LIQUIDITY (after Meteora deployment)
     // ============================================================
 
-    /// Records liquidity received from Meteora deployment.
-    /// Called by authority after successful deployment.
+    /// Records the liquidity delta received from a Meteora add_liquidity CPI.
+    ///
+    /// @dev Authority-gated. Passes the plaintext liquidity_delta to MPC, which adds it
+    ///      to the vault's encrypted total_liquidity field.
+    /// @dev The operator must provide the correct liquidity_delta from the Meteora return value.
+    ///      An incorrect value desynchronizes encrypted state from the actual Meteora position.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - liquidity_delta is plaintext u64 — visible on-chain (acceptable since the Meteora
+    ///   deposit itself is public).
+    /// - Trust assumption: operator provides correct delta. Consider adding an on-chain
+    ///   cross-check against Meteora position state in future versions.
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param liquidity_delta The liquidity amount returned by Meteora's add_liquidity.
     pub fn record_liquidity(
         ctx: Context<RecordLiquidity>,
         computation_offset: u64,
@@ -515,7 +600,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![RecordLiquidityCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -558,8 +642,25 @@ pub mod zodiac_liquidity {
     // WITHDRAW (computes pro-rata share and withdraws)
     // ============================================================
 
-    /// Withdraws user's deposited amount from the vault.
-    /// Simplified: user withdraws everything, conversion to LP tokens done off-chain.
+    /// Computes the user's withdrawal amounts (base + quote) via MPC.
+    ///
+    /// @dev The MPC circuit reads the user's encrypted position and returns the amounts
+    ///      encrypted for the user's x25519 key. No on-chain state is modified.
+    /// @dev The callback emits a WithdrawEvent with encrypted_base_amount and
+    ///      encrypted_quote_amount. Only the user can decrypt these with their x25519 key.
+    /// @dev Actual token movements happen separately via withdraw_from_meteora_damm_v2
+    ///      and relay_transfer_to_destination.
+    ///
+    /// Security invariants:
+    /// - User must own the position (PDA seeds include user key).
+    /// - Output is encrypted for the user's pubkey — MPC cluster cannot see the output
+    ///   after encryption (only during computation).
+    /// - No state mutation in callback — position/vault are read-only.
+    /// - Shared type requires both x25519_pubkey AND shared_nonce (per circuit .idarc).
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param encryption_pubkey User's x25519 public key for output encryption.
+    /// @param shared_nonce Nonce for Shared type encryption.
     pub fn withdraw(
         ctx: Context<Withdraw>,
         computation_offset: u64,
@@ -589,7 +690,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![ComputeWithdrawalCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -642,8 +742,21 @@ pub mod zodiac_liquidity {
     // GET USER POSITION (lets user see their own balance)
     // ============================================================
 
-    /// Gets user's current position (encrypted for the user only).
-    /// Note: LP share calculation moved off-chain to reduce circuit complexity.
+    /// Gets the user's current position (base_deposited, quote_deposited, lp_share),
+    /// encrypted for the user's x25519 key only.
+    ///
+    /// @dev Read-only MPC computation. Emits a UserPositionEvent with three encrypted u64s.
+    /// @dev LP share calculation is off-chain to reduce circuit complexity (division is
+    ///      extremely expensive in MPC — ~3+ billion ACUs).
+    ///
+    /// Security invariants:
+    /// - User must own the position (PDA seeds include user key).
+    /// - No state mutation. Callback has no writable accounts.
+    /// - Output is encrypted for the user's pubkey.
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param encryption_pubkey User's x25519 public key for output encryption.
+    /// @param shared_nonce Nonce for Shared type encryption.
     pub fn get_user_position(
         ctx: Context<GetUserPosition>,
         computation_offset: u64,
@@ -670,7 +783,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![GetUserPositionCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -710,8 +822,23 @@ pub mod zodiac_liquidity {
     // CLEAR POSITION (zeros user position after withdrawal confirmed)
     // ============================================================
 
-    /// Clears a user's position after withdrawal has been confirmed.
-    /// Only callable by vault authority (protocol clears after confirming withdrawal).
+    /// Clears a user's position after withdrawal has been confirmed off-chain.
+    ///
+    /// @dev Authority-gated. Zeros the user's encrypted position and deducts the withdrawal
+    ///      amounts from the vault's encrypted totals via MPC.
+    /// @dev Called AFTER the operator has confirmed that tokens have been transferred to
+    ///      the user via relay_transfer_to_destination.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call (checked: authority.key() == vault.authority).
+    /// - Trust assumption: operator provides correct base_withdraw_amount and
+    ///   quote_withdraw_amount matching the decrypted compute_withdrawal output.
+    /// - Both vault and user_position are writable in the callback (state mutation).
+    /// - After clearing, the user's position_state should be all-zero (encrypted).
+    ///
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param base_withdraw_amount Plaintext base amount to deduct from vault totals.
+    /// @param quote_withdraw_amount Plaintext quote amount to deduct from vault totals.
     pub fn clear_position(
         ctx: Context<ClearPosition>,
         computation_offset: u64,
@@ -752,7 +879,6 @@ pub mod zodiac_liquidity {
             ctx.accounts,
             computation_offset,
             args,
-            None,
             vec![ClearPositionCallback::callback_ix(
                 computation_offset,
                 &ctx.accounts.mxe_account,
@@ -807,9 +933,26 @@ pub mod zodiac_liquidity {
     // METEORA DAMM V2 CPI (Relay PDA signs all interactions)
     // ============================================================
 
-    /// Deploy aggregated liquidity to Meteora DAMM v2.
-    /// Relay PDA signs the CPI, breaking user → LP linkability.
-    /// Called by vault authority after reveal_pending_deposits.
+    /// Deploys aggregated liquidity to a Meteora DAMM v2 pool via relay PDA CPI.
+    ///
+    /// @dev The relay PDA (seeds: [b"zodiac_relay", vault, relay_index]) signs the CPI
+    ///      to Meteora's add_liquidity instruction. This breaks the user-to-LP linkability
+    ///      since the pool only sees the protocol's relay PDA, not individual users.
+    /// @dev If the quote token is WSOL and sol_amount is provided, SOL is automatically
+    ///      wrapped via system_program::transfer + sync_native before the CPI.
+    ///
+    /// Security invariants:
+    /// - Requires a registered ephemeral wallet PDA (prevents unauthorized Meteora CPI).
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - Relay PDA signer seeds include vault key + relay_index — cannot forge.
+    /// - Pool, position, and vault accounts are validated by the Meteora DAMM v2 program.
+    /// - Emits DepositedToMeteoraEvent for off-chain tracking.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param liquidity_delta Amount of liquidity to add (u128, Meteora native unit).
+    /// @param token_a_amount_threshold Maximum token A slippage.
+    /// @param token_b_amount_threshold Maximum token B slippage.
+    /// @param sol_amount Optional SOL amount to wrap as WSOL for token B.
     pub fn deposit_to_meteora_damm_v2(
         ctx: Context<DepositToMeteoraDammV2>,
         relay_index: u8,
@@ -896,9 +1039,22 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Withdraw liquidity from Meteora DAMM v2.
-    /// Relay PDA signs the CPI. Tokens go to relay accounts
-    /// for distribution to users via MPC-computed shares.
+    /// Withdraws liquidity from a Meteora DAMM v2 pool via relay PDA CPI.
+    ///
+    /// @dev The relay PDA signs Meteora's remove_liquidity CPI. Tokens are returned to
+    ///      the relay PDA's token accounts, NOT directly to users. The operator then
+    ///      calls relay_transfer_to_destination to send tokens to the user's ephemeral wallet.
+    ///
+    /// Security invariants:
+    /// - Requires a registered ephemeral wallet PDA.
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - Pool authority is validated against the hardcoded damm_v2_pool_authority() address.
+    /// - Emits WithdrawnFromMeteoraEvent for off-chain tracking.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param liquidity_delta Amount of liquidity to remove (u128).
+    /// @param token_a_amount_threshold Minimum token A to receive (slippage protection).
+    /// @param token_b_amount_threshold Minimum token B to receive (slippage protection).
     pub fn withdraw_from_meteora_damm_v2(
         ctx: Context<WithdrawFromMeteoraDammV2>,
         relay_index: u8,
@@ -962,8 +1118,19 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Create a Meteora position for a relay PDA.
-    /// Called once per relay per pool to set up the relay's position.
+    /// Creates a Meteora DAMM v2 position for a relay PDA.
+    ///
+    /// @dev Called once per relay per pool. The RelayPositionTracker PDA
+    ///      (seeds: [b"relay_position", vault, relay_index, pool]) enforces uniqueness.
+    /// @dev The relay PDA signs the CPI and pays rent for the Meteora position account.
+    ///
+    /// Security invariants:
+    /// - Requires a registered ephemeral wallet PDA.
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - RelayPositionTracker init prevents duplicate positions (same relay + pool).
+    /// - Position NFT mint is a new keypair (signer), preventing replay.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
     pub fn create_meteora_position(
         ctx: Context<CreateMeteoraPosition>,
         relay_index: u8,
@@ -1021,10 +1188,23 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Create a Meteora pool via a relay PDA.
-    /// The relay PDA acts as payer for the Meteora initialize_pool CPI,
-    /// so the pool is not linked to any user wallet.
-    /// The relay PDA must be funded with SOL + tokens first (via fund_relay).
+    /// Creates a Meteora DAMM v2 pool via a relay PDA (config-based).
+    ///
+    /// @dev The relay PDA acts as both creator and payer for the Meteora initialize_pool CPI.
+    ///      The pool is not linked to any user wallet — only to the protocol's relay PDA.
+    /// @dev The relay PDA must be pre-funded with SOL (~0.5 SOL for rent) and tokens
+    ///      (initial liquidity) via fund_relay before calling this.
+    ///
+    /// Security invariants:
+    /// - Requires a registered ephemeral wallet PDA.
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - Pool config account is validated by the Meteora DAMM v2 program.
+    /// - Initial liquidity comes from the relay PDA's token accounts.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param liquidity Initial liquidity amount (u128).
+    /// @param sqrt_price Initial sqrt price (u128).
+    /// @param activation_point Optional activation slot/timestamp.
     pub fn create_pool_via_relay(
         ctx: Context<CreatePoolViaRelay>,
         relay_index: u8,
@@ -1093,9 +1273,27 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Create a customizable Meteora pool via a relay PDA.
-    /// Unlike create_pool_via_relay, this does not require a config account
-    /// and allows full control over pool parameters (fees, price range, activation).
+    /// Creates a customizable Meteora DAMM v2 pool via a relay PDA.
+    ///
+    /// @dev Unlike create_pool_via_relay, this does not require a config account and
+    ///      allows full control over pool parameters (fees, price range, activation).
+    ///      Preferred for production deployments where fee control is important.
+    ///
+    /// Security invariants:
+    /// - Same as create_pool_via_relay.
+    /// - Fee parameters are validated by the Meteora DAMM v2 program.
+    /// - sqrt_min_price and sqrt_max_price define the price range for the pool.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param pool_fees Fee parameters (base_fee, dynamic_fee, protocol_fee, etc.).
+    /// @param sqrt_min_price Minimum sqrt price for the pool range (u128).
+    /// @param sqrt_max_price Maximum sqrt price for the pool range (u128).
+    /// @param has_alpha_vault Whether to enable alpha vault.
+    /// @param liquidity Initial liquidity amount (u128).
+    /// @param sqrt_price Initial sqrt price (u128).
+    /// @param activation_type Activation type (slot-based or time-based).
+    /// @param collect_fee_mode Fee collection mode (0 = linear).
+    /// @param activation_point Optional activation slot/timestamp.
     pub fn create_customizable_pool_via_relay(
         ctx: Context<CreateCustomizablePoolViaRelay>,
         relay_index: u8,
@@ -1174,9 +1372,19 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Fund a relay PDA's token accounts.
-    /// Transfers tokens from authority's token account to the relay PDA's token account.
-    /// Must be called before create_pool_via_relay or deposit_to_meteora_damm_v2.
+    /// Funds a relay PDA's token account from the authority's token account.
+    ///
+    /// @dev Authority-gated. Transfers SPL tokens from authority to the relay PDA's
+    ///      associated token account. Must be called before create_pool_via_relay
+    ///      or deposit_to_meteora_damm_v2 to ensure the relay has tokens to deploy.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - Token transfer uses standard SPL token::transfer (not PDA-signed).
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param amount Number of tokens to transfer.
     pub fn fund_relay(
         ctx: Context<FundRelay>,
         relay_index: u8,
@@ -1215,9 +1423,20 @@ pub mod zodiac_liquidity {
     // RELAY TRANSFER TO DESTINATION (withdrawal last mile)
     // ============================================================
 
-    /// Transfers tokens from a relay PDA's token account to a destination
-    /// (typically an ephemeral wallet). Called after withdraw_from_meteora_damm_v2
-    /// moves tokens from Meteora back to the relay's token accounts.
+    /// Transfers tokens from a relay PDA's token account to a destination.
+    ///
+    /// @dev Authority-gated. Relay PDA signs the token::transfer via PDA signer seeds.
+    ///      Typically called after withdraw_from_meteora_damm_v2 to forward tokens
+    ///      to the user's ephemeral wallet.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - Relay PDA signs with seeds [b"zodiac_relay", vault, relay_index, bump].
+    /// - Destination is an arbitrary token account — the authority controls routing.
+    /// - Risk: compromised authority can redirect funds to any account.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param amount Number of tokens to transfer.
     pub fn relay_transfer_to_destination(
         ctx: Context<RelayTransferToDestination>,
         relay_index: u8,
@@ -1268,8 +1487,17 @@ pub mod zodiac_liquidity {
     // ============================================================
 
     /// Withdraws SOL from a relay PDA back to the authority.
-    /// Used to reclaim rent SOL after Meteora operations are complete.
-    /// Only callable by vault authority.
+    ///
+    /// @dev Authority-gated. Used to reclaim rent SOL from relay PDAs after Meteora
+    ///      operations complete. Relay PDAs accumulate SOL from pool creation rent.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - SOL goes to authority only (not an arbitrary destination).
+    /// - Relay PDA signs via PDA signer seeds.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param lamports Amount of SOL (in lamports) to withdraw.
     pub fn withdraw_relay_sol(
         ctx: Context<WithdrawRelaySol>,
         relay_index: u8,
@@ -1313,8 +1541,17 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Closes a relay PDA's token account, returning rent to the authority.
-    /// Only callable by vault authority. The token account must have zero balance.
+    /// Closes a relay PDA's token account, returning rent SOL to the authority.
+    ///
+    /// @dev Authority-gated. The SPL Token program enforces zero balance before close.
+    ///      Use relay_transfer_to_destination to drain tokens first.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - Token account must have zero balance (enforced by SPL Token program).
+    /// - Rent SOL goes to authority.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
     pub fn close_relay_token_account(
         ctx: Context<CloseRelayTokenAccount>,
         relay_index: u8,
@@ -1355,8 +1592,19 @@ pub mod zodiac_liquidity {
     // EPHEMERAL WALLET MANAGEMENT
     // ============================================================
 
-    /// Registers an ephemeral wallet PDA for a vault.
-    /// Only callable by vault authority. Allows the wallet to sign Meteora CPI instructions.
+    /// Registers an ephemeral wallet PDA, authorizing it for Meteora CPI operations.
+    ///
+    /// @dev Authority-gated. Creates an EphemeralWalletAccount PDA
+    ///      (seeds: [b"ephemeral", vault, wallet]) that serves as an authorization
+    ///      check for Meteora CPI instructions (deposit, withdraw, create position/pool).
+    /// @dev Per-operation pattern: a fresh ephemeral wallet is registered before each
+    ///      Meteora CPI, used once, then closed via close_ephemeral_wallet.
+    ///      This prevents cross-operation linkability.
+    ///
+    /// Security invariants:
+    /// - PDA existence is the sole authorization check (no is_active flag).
+    /// - One PDA per vault+wallet pair (enforced by seeds).
+    /// - Wallet key is stored in the account for auditability.
     pub fn register_ephemeral_wallet(
         ctx: Context<RegisterEphemeralWallet>,
     ) -> Result<()> {
@@ -1374,8 +1622,16 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
-    /// Closes an ephemeral wallet PDA, returning rent to the authority.
-    /// Only callable by vault authority. Called after user withdraws all liquidity.
+    /// Closes an ephemeral wallet PDA, returning rent SOL to the authority.
+    ///
+    /// @dev Authority-gated. Called after the Meteora CPI operation completes to
+    ///      reclaim the ~0.001 SOL rent and revoke the wallet's authorization.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can close.
+    /// - Anchor's `close` attribute transfers rent to authority and zeros the account.
+    /// - Once closed, the ephemeral wallet can no longer sign Meteora CPIs
+    ///   (the PDA no longer exists, so bump validation will fail).
     pub fn close_ephemeral_wallet(
         ctx: Context<CloseEphemeralWallet>,
     ) -> Result<()> {
@@ -1457,6 +1713,11 @@ pub struct InitVaultCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account, checked by arcium program
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1471,6 +1732,11 @@ pub struct InitUserPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1485,6 +1751,11 @@ pub struct InitDepositCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1499,6 +1770,11 @@ pub struct InitRevealPendingCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1513,6 +1789,11 @@ pub struct InitRecordLiquidityCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1527,6 +1808,11 @@ pub struct InitWithdrawCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1541,6 +1827,11 @@ pub struct InitGetPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }
@@ -1555,6 +1846,11 @@ pub struct InitClearPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
+    #[account(mut)]
+    /// CHECK: address_lookup_table
+    pub address_lookup_table: UncheckedAccount<'info>,
+    /// CHECK: lut_program
+    pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
     pub system_program: Program<'info, System>,
 }

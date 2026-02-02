@@ -8,7 +8,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 62/62 passing (25 mixer + 37 integration), Devnet 25/25 mixer passing (17 SOL + 8 SPL). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening + SPL token mixer tests.
+**Phase:** Localnet 39/39 full privacy integration passing + 62/62 (25 mixer + 37 integration). Arcium 0.6.6 upgrade complete. Devnet 25/25 mixer passing (17 SOL + 8 SPL). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening + SPL token mixer tests.
 
 **Current Program ID (devnet):** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
 **Localnet Program ID:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
@@ -16,7 +16,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 **What's Done:**
 - Project structure created
-- Dependencies configured (Anchor 0.32.1, Arcium 0.6.3)
+- Dependencies configured (Anchor 0.32.1, Arcium 0.6.6)
 - Arcium documentation in `/docs/arcium/`
 - Arcis circuits in `encrypted-ixs/src/lib.rs`
 - Anchor program with Arcium integration complete
@@ -64,6 +64,9 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Localnet (2026-02-01):** 62/62 passing (25 mixer + 37 integration). SPL token mixer tests added.
 - **Added (2026-02-01):** SPL token tests for ZK mixer — 8 new tests covering deposit, withdrawal, double-spend prevention, deposit limit, pause enforcement, oversized outputs, and auth checks. Fixed `generateProofAndFormat` to use `getMintAddressField()` for circuit mintAddress input (base58 → field element conversion).
 - **Devnet (2026-02-01):** 25/25 mixer tests passing (17 SOL + 8 SPL).
+- **Upgraded (2026-02-02):** Arcium SDK 0.6.3 → 0.6.6. Breaking changes: `queue_computation` dropped 4th arg (`None`), `init_computation_definition_accounts` macro now requires `address_lookup_table` (mut) and `lut_program` fields in comp def account structs. All 8 comp def structs and 8 queue_computation calls updated. All 4 test files updated with MXE LUT PDA derivation.
+- **Devnet (2026-02-02):** Redeployed zodiac_liquidity to `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` with Arcium 0.6.6.
+- **Localnet (2026-02-02):** 39/39 full privacy integration tests passing (mixer + MPC + Meteora, 2 users, Arcium 0.6.6).
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -88,11 +91,11 @@ The `.idarc` circuit descriptor shows `Shared` parameters require BOTH `arcis_x2
 | Component | Version | Purpose |
 |-----------|---------|---------|
 | Anchor | 0.32.1 | Solana program framework |
-| Arcium | 0.6.3 | MPC privacy layer |
+| Arcium | 0.6.6 | MPC privacy layer |
 | Rust | 1.89.0 | Program language |
-| @arcium-hq/client | 0.6.3 | TypeScript encryption |
+| @arcium-hq/client | 0.6.6 | TypeScript encryption |
 | Meteora DAMM v2 | - | Liquidity pool CPI |
-| ARX node Docker | v0.6.3 | Must match Arcium SDK version (pinned via `docker tag`) |
+| ARX node Docker | v0.6.6 | Must match Arcium SDK version (pinned via `docker tag`) |
 
 ## Meteora DAMM v2 Terminology
 
@@ -388,6 +391,7 @@ The callback server handles MPC outputs that exceed Solana's ~1KB transaction li
 | `tests/zodiac-liquidity-fail.ts` | Fail/auth unit tests (7 tests) |
 | `tests/zodiac-mixer.ts` | Mixer tests — SOL + SPL deposits, withdrawals, double-spend, pause, auth (25 tests) |
 | `tests/zodiac-mpc-meteora-integration.ts` | End-to-end integration test — full 13-step privacy flow (37 tests) |
+| `tests/zodiac-full-privacy-integration.ts` | Full privacy integration — mixer + MPC + Meteora, 2 users (39 tests) |
 | `tests/lib/test_alt.ts` | Address Lookup Table + versioned tx helpers (with blockhash retry) |
 | `build/*.arcis` | Compiled circuit files |
 | `build/*.hash` | Circuit hashes (used by `circuit_hash!` macro) |
@@ -591,6 +595,7 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 33. **`Box<Account<>>` for stack-heavy structs** - `TransactSpl` exceeded the 4096-byte stack limit after changing `fee_recipient_ata` from `UncheckedAccount` to `Account<TokenAccount>`. Wrapping with `Box<Account<'info, TokenAccount>>` moves deserialization to the heap. Common pattern for Anchor account structs with many validated accounts.
 34. **Mixer nullifier cross-check mechanism** - The 4-nullifier pattern (`nullifier0..3`) prevents swapped-position double-spend: `nullifier0/1` use `init` (fail if exists), `nullifier2/3` are `SystemAccount` (fail if already owned by mixer program). This means a nullifier used in position 0 can't later be used in position 1 without tripping the cross-check. The `DuplicateNullifier` check is defense-in-depth for same-nullifier-both-positions within a single tx.
 35. **Versioned transactions need blockhash retry** - Mixer tests use versioned transactions (for Address Lookup Tables). The `sendAndConfirmVersionedTransaction` helper now retries up to 3× on "Blockhash not found" with a 2s delay between attempts. On retry, it fetches a fresh blockhash and re-signs.
+36. **Arcium 0.6.6 breaking changes** - `queue_computation` dropped the 4th argument (`None` for optional ALT). `init_computation_definition_accounts` macro now requires two new fields: `address_lookup_table: UncheckedAccount` (must be `#[account(mut)]`) and `lut_program: UncheckedAccount`. The `address_lookup_table` is the MXE's LUT PDA derived via `findProgramAddressSync([mxePda, u64_le(0)], AddressLookupTableProgram.programId)`. The `lut_program` is `AddressLookupTableProgram.programId`. Use `arcup install 0.6.6` to update CLI + Docker images together.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 
@@ -634,11 +639,11 @@ The Arcium SDK version used to build the on-chain program (`arcium_program_0.6.3
 ```bash
 # 1. Check ARX node version (should match Arcium SDK version)
 docker exec artifacts-arx-node-0-1 bash -c "head -1 /usr/arx-node/logs/arx_log_*.log" 2>/dev/null
-# Look for: version=0.6.3 (GOOD) vs version=0.6.6 (BAD)
+# Look for: version=0.6.6 (GOOD)
 
 # 2. Check Arcium CLI version (this is the SDK version)
 docker exec zodiac-dev bash -c "arcium --version"
-# Should output: arcium-cli 0.6.3
+# Should output: arcium-cli 0.6.6
 
 # 3. Check which Docker image is tagged as :latest
 docker inspect arcium/arx-node:latest --format '{{.Id}}'
@@ -652,16 +657,16 @@ You CANNOT edit `artifacts/docker-compose-arx-env.yml` because `arcium test` **r
 
 ```bash
 # 1. Pull the correct version (if not already present)
-docker pull arcium/arx-node:v0.6.3
-docker pull arcium/trusted-dealer:v0.6.3
+docker pull arcium/arx-node:v0.6.6
+docker pull arcium/trusted-dealer:v0.6.6
 
 # 2. Retag as :latest (this overwrites the wrong :latest)
-docker tag arcium/arx-node:v0.6.3 arcium/arx-node:latest
-docker tag arcium/trusted-dealer:v0.6.3 arcium/trusted-dealer:latest
+docker tag arcium/arx-node:v0.6.6 arcium/arx-node:latest
+docker tag arcium/trusted-dealer:v0.6.6 arcium/trusted-dealer:latest
 
 # 3. Verify both point to the same image
 docker images | grep arcium
-# Both :latest and :v0.6.3 should show the same IMAGE ID
+# Both :latest and :v0.6.6 should show the same IMAGE ID
 
 # 4. Stop any running ARX containers from previous failed runs
 docker stop artifacts-arx-node-0-1 artifacts-arx-node-1-1 artifacts-arcium-trusted-dealer-1 2>/dev/null
@@ -678,8 +683,7 @@ The version tag must match the Arcium SDK in `Cargo.toml` and the `.so` artifact
 
 | Arcium SDK (`arcium-cli --version`) | Program artifact | ARX node Docker tag |
 |--------------------------------------|------------------|---------------------|
-| 0.6.3 | `arcium_program_0.6.3.so` | `arcium/arx-node:v0.6.3` |
-| 0.6.6 | `arcium_program_0.6.6.so` (would need update) | `arcium/arx-node:v0.6.6` |
+| 0.6.6 | `arcium_program_0.6.6.so` | `arcium/arx-node:v0.6.6` |
 
 ### Prevention
 

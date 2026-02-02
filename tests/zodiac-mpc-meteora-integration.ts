@@ -1,7 +1,7 @@
 import "dotenv/config";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
-import { PublicKey, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
+import { PublicKey, Keypair, SystemProgram, Transaction, AddressLookupTableProgram } from "@solana/web3.js";
 import { ZodiacLiquidity } from "../target/types/zodiac_liquidity";
 import { randomBytes, createHash } from "crypto";
 import nacl from "tweetnacl";
@@ -2054,12 +2054,22 @@ describe("zodiac-integration", () => {
       return "skipped";
     }
 
+    // Derive the MXE LUT PDA (authority=mxePda, recentSlot=0)
+    const mxePda = getMXEAccAddress(program.programId);
+    const slotBuffer = Buffer.alloc(8); // u64 LE = 0
+    const [mxeLutPda] = PublicKey.findProgramAddressSync(
+      [mxePda.toBuffer(), slotBuffer],
+      AddressLookupTableProgram.programId,
+    );
+
     // @ts-ignore - Dynamic method call
     const sig = await program.methods[methodName]()
       .accounts({
         compDefAccount: compDefPDA,
         payer: owner.publicKey,
-        mxeAccount: getMXEAccAddress(program.programId),
+        mxeAccount: mxePda,
+        addressLookupTable: mxeLutPda,
+        lutProgram: AddressLookupTableProgram.programId,
       })
       .signers([owner])
       .rpc();

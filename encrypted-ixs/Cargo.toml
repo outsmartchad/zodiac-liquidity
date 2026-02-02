@@ -5,5 +5,5 @@ description = "Arcis encrypted instructions for Zodiac Liquidity MPC computation
 edition = "2021"
 
 [dependencies]
-arcis = "=0.6.3"
+arcis = "=0.6.6"
 blake3 = "=1.8.2"

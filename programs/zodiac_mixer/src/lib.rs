@@ -41,6 +41,20 @@ pub mod zodiac_mixer {
 
     use super::*;
 
+    /// Initializes the ZK mixer for SOL: creates the Merkle tree, tree token PDA, and global config.
+    ///
+    /// @dev If ADMIN_PUBKEY is set (mainnet), only the admin can call. On localnet/devnet,
+    ///      ADMIN_PUBKEY is None — any signer can initialize.
+    /// @dev Sets default fee configuration: 0% deposit, 0.35% withdrawal, 5% error margin.
+    /// @dev Merkle tree height: 26 levels (~67M leaves). Root history: 100 entries.
+    ///
+    /// Security invariants:
+    /// - Can only be called once (Anchor `init` constraint on all three accounts).
+    /// - Authority is set to the signer and stored in tree_account and global_config.
+    /// - tree_token PDA holds SOL deposits — authority for lamport transfers.
+    /// - global_config PDA is the authority for SPL token transfers (ATA owner).
+    ///
+    /// @notice ADMIN_PUBKEY must be set for mainnet deployment.
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         if let Some(admin_key) = ADMIN_PUBKEY {
             require!(ctx.accounts.authority.key().eq(&admin_key), ErrorCode::Unauthorized);
@@ -74,6 +88,10 @@ pub mod zodiac_mixer {
         Ok(())
     }
 
+    /// Updates the maximum deposit amount for the SOL Merkle tree.
+    ///
+    /// @dev Authority-gated via `has_one = authority` on the tree account.
+    /// @param new_limit New maximum deposit in lamports.
     pub fn update_deposit_limit(ctx: Context<UpdateDepositLimit>, new_limit: u64) -> Result<()> {
         let tree_account = &mut ctx.accounts.tree_account.load_mut()?;
         tree_account.max_deposit_amount = new_limit;
@@ -81,6 +99,15 @@ pub mod zodiac_mixer {
         Ok(())
     }
 
+    /// Updates fee configuration parameters in the global config.
+    ///
+    /// @dev Authority-gated via `has_one = authority` on global_config.
+    /// @dev Each parameter is optional — only provided values are updated.
+    /// @dev All rates are in basis points (0-10000, where 10000 = 100%).
+    ///
+    /// @param deposit_fee_rate Optional new deposit fee rate (basis points).
+    /// @param withdrawal_fee_rate Optional new withdrawal fee rate (basis points).
+    /// @param fee_error_margin Optional new fee tolerance margin (basis points).
     pub fn update_global_config(
         ctx: Context<UpdateGlobalConfig>,
         deposit_fee_rate: Option<u16>,
@@ -107,6 +134,10 @@ pub mod zodiac_mixer {
         Ok(())
     }
 
+    /// Toggles the mixer pause state. When paused, transact and transact_spl are blocked.
+    ///
+    /// @dev Authority-gated via `has_one = authority` on global_config.
+    /// @dev Emergency mechanism — use to halt operations if an exploit is discovered.
     pub fn toggle_pause(ctx: Context<TogglePause>) -> Result<()> {
         let global_config = &mut ctx.accounts.global_config;
         global_config.paused = !global_config.paused;
@@ -114,6 +145,13 @@ pub mod zodiac_mixer {
         Ok(())
     }
 
+    /// Initializes a separate Merkle tree for a specific SPL token mint.
+    ///
+    /// @dev Authority-gated if ADMIN_PUBKEY is set. Validates the mint against
+    ///      ALLOWED_TOKENS (unless ALLOW_ALL_SPL_TOKENS is true).
+    /// @dev Each SPL token gets its own Merkle tree with PDA seeds [b"merkle_tree", mint].
+    ///
+    /// @param max_deposit_amount Maximum deposit in token base units.
     pub fn initialize_tree_account_for_spl_token(
         ctx: Context<InitializeTreeAccountForSplToken>,
         max_deposit_amount: u64,
@@ -142,6 +180,10 @@ pub mod zodiac_mixer {
         Ok(())
     }
 
+    /// Updates the maximum deposit amount for a specific SPL token Merkle tree.
+    ///
+    /// @dev Authority-gated via `has_one = authority` on the tree account.
+    /// @param new_limit New maximum deposit in token base units.
     pub fn update_deposit_limit_for_spl_token(
         ctx: Context<UpdateDepositLimitForSplToken>,
         new_limit: u64,
