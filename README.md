@@ -1,68 +1,79 @@
 # Zodiac Liquidity
 
-Privacy protocol for LPers powered by Arcium MPC and zk mixer. Supports Meteora DAMM v2 pools (DLMM coming soon).
+**One app that privately does everything on Meteora DAMM v2:** Swap, LP, Create Pools, Claim Fees — all through the ZK mixer + relay PDA pattern so nobody knows who's trading.
+
+Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token only now; Token-2022 and C-SPL soon. Meteora DAMM v2 pools (DLMM coming soon).
+
+## Vision
+
+Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden. The same three layers (ZK mixer → ephemeral wallets → relay PDA) apply to every action.
+
+**Today:** Full privacy for LP (deposit/withdraw). **Next:** Private swap, private pool creation, and automated fee claiming — all without ARX nodes for swap/fee/close (pure Meteora CPI). Operator will add PostgreSQL, real pool data (Geyser), and multi-service tx landing; frontend will get Swap tab, pool creation page, and real TVL/volume.
 
 ## The Problem
 
-On-chain liquidity provision is fully transparent. When you deposit into a pool, everyone can see your wallet, your deposit amount, and your position size. This leaks your alpha and lp strategy.
+On-chain DeFi is fully transparent. Swaps, liquidity provision, and pool creation all expose your wallet, amounts, and strategy. That leaks alpha and makes you a target.
 
 ## How Zodiac Solves It
 
-Zodiac combines **MPC encryption** and a **ZK mixer** for full LP privacy.
+Zodiac combines **MPC encryption** and a **ZK mixer** for full privacy across swap and LP.
 
-- **Encrypted state** — All deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
-- **Identity unlinkability** — A ZK mixer breaks the link between user wallets and deposits. Single-use ephemeral wallets prevent cross-operation tracing.
+- **Encrypted state** — Deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
+- **Identity unlinkability** — The ZK mixer breaks the link between user wallets and actions. Single-use ephemeral wallets prevent cross-operation tracing.
 - **User-only results** — When a user queries their position or withdraws, the MPC network re-encrypts the result for that user's key. Only they can read it.
 
 ### What's Hidden vs Visible
 
-**Hidden (encrypted, never revealed on-chain):**
-- Individual deposit and withdrawal amounts
+**Hidden (encrypted or unlinkable, never revealed on-chain):**
+- Individual deposit, withdrawal, and swap amounts
 - Each user's liquidity position size
-- User-to-Meteora position link (a Protocol relay PDA holds all pool positions, not individual users)
+- User-to-Meteora position link (a protocol relay PDA holds all pool positions, not individual users)
 
 **Visible:**
-- That wallet deposited to the mixer
+- That the wallet interacted with the mixer
 - Total aggregated liquidity in the Meteora pool (the pool itself is public)
 
 ## Architecture
 
 ```
+User → App (swap / LP / create pool)
+         ↓
+       ZK Mixer (breaks identity link) → Ephemeral wallet
+         ↓
+       Operator (fund relay → execute on Meteora → return to user)
+         ↓                    ↑
+       Meteora DAMM v2    Geyser (real-time pool data, optional)
+```
+
+**LP (current):**
+
+```
 DEPOSIT:
-User wallet --> ZK Mixer (breaks identity link) --> Ephemeral wallet --> Zodiac vault
-                                                                    (Arcium encrypts amount)
-                                                                            |
-                                                                            v
-                                                                      Relay PDA --> Meteora pool
-                                                                   (single aggregate position)
+User wallet --> ZK Mixer --> Ephemeral wallet --> Zodiac vault (Arcium encrypts amount)
+                                                                  |
+                                                                  v
+                                                            Relay PDA --> Meteora pool
 
 WITHDRAWAL:
-Ephemeral wallet --> Zodiac vault (Arcium computes user's share)
-                           |
-                           v
-                     Relay PDA --> Meteora pool (remove_liquidity CPI)
-                           |
-                           v
-                     Relay PDA --> Ephemeral wallet (relay transfer)
-                                        |
-                                        v
-                                  ZK Mixer --> User wallet
+Ephemeral --> Zodiac vault (Arcium computes share) --> Relay PDA (remove_liquidity) --> Ephemeral --> ZK Mixer --> User
 ```
+
+**Swap / Fee / Close (on-chain ready, operator + UI in progress):** Same relay PDA pattern — operator funds relay, calls `swap_via_relay` / `claim_position_fee_via_relay` / `close_position_via_relay`. No MPC needed for swap; no ARX nodes required.
 
 **Three layers of unlinkability:**
 
-1. **ZK Mixer** — Breaks the wallet-to-deposit link via zero-knowledge proofs.
-2. **Ephemeral Wallets** — Single-use wallets per operation, closed after one CPI.
+1. **ZK Mixer** — Breaks the wallet-to-action link via zero-knowledge proofs.
+2. **Ephemeral Wallets** — Single-use wallets per operation, closed after use.
 3. **Relay PDA** — Single aggregated Meteora position across all users. No individual user touches the pool.
 
 ## Tech Stack
 
 | Component | Purpose |
 |-----------|---------|
-| Anchor 0.32.1 | Solana program framework |
-| Arcium 0.6.6 | Arcium mxe program framework |
-| Meteora DAMM v2 | Liquidity pool integration |
-| Arcis circuits | MPC computation definitions |
+| Anchor 0.32.x | Solana program framework |
+| Arcium 0.7.x | MXE program (comp defs, LUT from `lut_offset_slot`) |
+| Meteora DAMM v2 | Liquidity pool integration (swap, LP, create pool, claim fees) |
+| Arcis circuits | MPC computation definitions for LP |
 
 ## Repositories
 
@@ -91,9 +102,11 @@ zodiac-liquidity/
 
 ## Program IDs
 
+See `Anchor.toml` and operator/relayer config for current IDs.
+
 | Program | Network | Program ID |
 |---------|---------|-----------|
-| zodiac_liquidity | Devnet | `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` |
+| zodiac_liquidity | Devnet | `73dLHfZn1aPZvC3rskcaJybPjofBPRk7qEYdH5VEiYwv` |
 | zodiac_mixer | Devnet | `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` |
 
 ## Test Status
@@ -105,7 +118,18 @@ zodiac-liquidity/
 | Devnet | 25/25 mixer (17 SOL + 8 SPL) | Passing |
 | Devnet | 37/37 integration (3-user sequential) | Passing |
 
-## Full Transaction Flow (13 Steps)
+## Roadmap
+
+Implementation order is documented in `.claude/plans/idempotent-whistling-dawn.md`. Summary:
+
+- **Phase 1 (on-chain):** `swap_via_relay`, `claim_position_fee_via_relay`, `close_position_via_relay` — pure Meteora CPI, no ARX.
+- **Phase 2 (operator):** PostgreSQL, swap pipeline (request → fund relay → swap → transfer), fee-claim scheduler, tx landing (Helius/Nozomi), optional Geyser pool watcher.
+- **Phase 3 (frontend):** Swap tab, pool creation page, real pool data (TVL, volume, fees) from operator.
+- **Phase 4 (polish):** Auto-fill quotes, fee display, real operation polling.
+
+All of the above is testable on localnet without ARX nodes.
+
+## Full Transaction Flow (13 Steps — LP)
 
 ```
  1. [user]       mixer.transact(proof)              -- deposit SOL/SPL to mixer
