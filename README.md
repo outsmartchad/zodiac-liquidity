@@ -20,7 +20,7 @@ Zodiac combines **MPC encryption** and a **ZK mixer** for full privacy across sw
 
 - **Encrypted state** — Deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
 - **Identity unlinkability** — The ZK mixer breaks the link between user wallets and actions. Single-use ephemeral wallets prevent cross-operation tracing.
-- **User-only results** — When a user queries their position or withdraws, the MPC network re-encrypts the result for that user's key. Only they can read it.
+- **User-only results** — When a user queries their position or withdraws, the MPC network re-encrypts the result for that user's key. Only the user can read it.
 
 ### What's Hidden vs Visible
 
