@@ -2,7 +2,7 @@
 
 **One app that privately does everything on Meteora DAMM v2:** Swap, LP, Create Pools, Claim Fees — so nobody knows who's trading/LPing.
 
-Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token only now; Token-2022 and C-SPL soon. Meteora DAMM v2 pools (DLMM coming soon).
+Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token and DAMM v2 pools now. Token-2022, C-SPL token, and DLMM pools coming soon.
 
 ## Vision
 
