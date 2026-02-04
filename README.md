@@ -50,11 +50,11 @@ User → App (swap / LP / create pool)
 **LP (current — single-sign flow):**
 
 ```
-DEPOSIT:  User --sign--> Mixer --> Operator --> Vault (MPC) --> Meteora pool
-WITHDRAW: Operator --> Vault (MPC) --> Meteora pool --> Destination wallet
+DEPOSIT:  User --sign--> Mixer --> Vault (MPC encrypt) --> Meteora pool
+WITHDRAW: Vault (MPC compute share) --> Meteora pool --> Destination wallet
 ```
 
-User signs 1-2 wallet txs to deposit into the mixer, then the operator handles everything: ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
+User signs 1-2 wallet txs to deposit into the mixer, then everything else happens automatically: ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
 
 **Swap / Fee / Close (on-chain ready, operator + UI in progress):** Same relay PDA pattern — operator funds relay, calls `swap_via_relay` / `claim_position_fee_via_relay` / `close_position_via_relay`. No MPC needed for swap; no ARX nodes required.
 
