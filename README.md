@@ -56,14 +56,6 @@ WITHDRAW: User --intent--> Vault (MPC compute share) --> Meteora pool --> Destin
 
 User signs 1-2 wallet txs to deposit into the mixer, then everything else happens automatically: ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
 
-**Swap / Fee / Close (on-chain ready, operator + UI in progress):** Same relay PDA pattern — operator funds relay, calls `swap_via_relay` / `claim_position_fee_via_relay` / `close_position_via_relay`. No MPC needed for swap; no ARX nodes required.
-
-**Three layers of unlinkability:**
-
-1. **ZK Mixer** — Breaks the wallet-to-action link via zero-knowledge proofs.
-2. **Ephemeral Wallets** — Single-use wallets per operation, closed after use.
-3. **Relay PDA** — Single aggregated Meteora position across all users. No individual user touches the pool.
-
 ## Tech Stack
 
 | Component | Purpose |
