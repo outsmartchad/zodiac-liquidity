@@ -103,7 +103,7 @@ async function main() {
   // Setup connection
   const rpcUrl =
     process.env.RPC_URL ||
-    "https://devnet.helius-rpc.com/?api-key=7853a445-0e8d-435d-8e33-c33d7df387ce";
+    "https://api.devnet.solana.com";
   const connection = new Connection(rpcUrl, "confirmed");
 
   // Load owner keypair
