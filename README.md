@@ -6,7 +6,7 @@ Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer.
 
 ## Vision
 
-Zodiac makes Meteora private. Swap, LP, create pools — nobody sees who you are or how much you're moving.
+Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden.
 
 **Today:** Private LP. Sign once, walk away. Your deposit gets encrypted and deployed to Meteora automatically.
 
