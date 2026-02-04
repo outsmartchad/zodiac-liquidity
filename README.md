@@ -43,8 +43,8 @@ User → App (swap / LP / create pool)
        ZK Mixer (breaks identity link) → Ephemeral wallet
          ↓
        Operator (fund relay → execute on Meteora → return to user)
-         ↓                    ↑
-       Meteora DAMM v2    Geyser (real-time pool data, optional)
+         ↓
+       Meteora DAMM v2
 ```
 
 **LP (current — single-sign flow):**
