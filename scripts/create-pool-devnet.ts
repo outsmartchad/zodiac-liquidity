@@ -36,7 +36,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 
-const ZODIAC_PROGRAM_ID = new PublicKey("7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2");
+const ZODIAC_PROGRAM_ID = new PublicKey("4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5");
 const DAMM_V2_PROGRAM_ID = new PublicKey("cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG");
 const POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTLcC");
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
