@@ -214,6 +214,52 @@ Never use `anchor build`, `cargo build`, or `solana program deploy` directly.
 | `tests/zodiac-mpc-meteora-integration.ts` | 37 integration tests — reference for full 13-step flow |
 | `tests/zodiac-full-privacy-integration.ts` | 39 tests — mixer + MPC + Meteora combined |
 
+## Arcium v0.7.0 Upgrade History
+
+We upgraded from Arcium SDK 0.6.3 → 0.6.6 → 0.7.0. Each version had breaking changes. This section documents what changed and how we fixed it, so future upgrades don't repeat the same mistakes.
+
+### v0.6.3 → v0.6.6 Breaking Changes
+
+1. **`queue_computation` dropped the 4th argument.** Was `queue_computation(program, offset, args, None)` — remove the `None`.
+2. **Comp def account structs need 2 new fields.** The `init_computation_definition_accounts` macro now requires:
+   - `address_lookup_table: UncheckedAccount` (must be `#[account(mut)]`)
+   - `lut_program: UncheckedAccount` (set to `AddressLookupTableProgram.programId`)
+3. **LUT address derivation.** The `address_lookup_table` is the MXE's LUT PDA: `findProgramAddressSync([mxePda, u64_le(0)], AddressLookupTableProgram.programId)`.
+
+### v0.6.6 → v0.7.0 Breaking Changes
+
+1. **LUT address comes from MXE account's `lutOffsetSlot`.** In v0.7.0, you can't derive it from slot 0 anymore. You must:
+   ```typescript
+   const mxeAcc = await getArciumProgram(provider).account.mxeAccount.fetch(mxePda);
+   const lutAddress = getLookupTableAddress(programId, mxeAcc.lutOffsetSlot);
+   ```
+2. **ARX node Docker images must match SDK version.** If `arcium test` hangs after MXE keygen succeeds but no computations complete, the ARX node image version doesn't match the SDK. Fix: `docker tag arcium/arx-node:v0.7.0 arcium/arx-node:latest`.
+3. **`Anchor.toml` cluster must match test target.** `arcium test` reads `[provider] cluster` during MXE init. If set to `"devnet"` while running localnet, MXE gets a devnet slot for `lutOffsetSlot` and `Authority` becomes `None`. Set `cluster = "localnet"` before `arcium test`, `cluster = "devnet"` before `arcium test --cluster devnet`.
+
+### v0.7.0 MXE Keygen Failure (the big one)
+
+**Problem:** After `arcium deploy` on devnet, MXE keygen can silently fail. `Authority` stays `None`. All comp def inits fail.
+
+**How to diagnose:**
+```bash
+arcium mxe-info <program-id> --rpc-url devnet
+# If "Authority: None" → keygen never completed
+```
+
+**Fix sequence:**
+1. Try `arcium finalize-mxe-keys <program-id> --cluster-offset 456 --keypair-path <key> --rpc-url devnet`
+2. Check `mxe-info` again. If authority is still `None`, the ARX nodes never processed the keygen.
+3. **Deploy to a fresh program ID.** Generate new keypair, update `declare_id!` + `Anchor.toml`, `arcium build --skip-keys-sync`, `arcium deploy`. The deploy+MXE bundle sometimes works when slot timing aligns.
+
+**Root cause:** `arcium deploy` bundles program deploy + MXE init. `InitMxePart2` creates a LUT using a recent slot, but the slot goes stale during the long program deploy. When the LUT creation fails, keygen never starts, and `Authority` stays `None` forever.
+
+**This is how we got the current program ID** (`4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`). The previous ID (`77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`) had a stuck MXE. We deployed fresh and it worked on the first shot.
+
+### Closed Program IDs (do NOT reuse)
+
+These were all previous deploys that were closed to reclaim SOL:
+`5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`, `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`, `Cwrhs9ch9kQBzcDXr1qajxwap5oZXrZBuZADK8vzS46U`, `77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`
+
 ## Tech Stack
 
 | Component | Version |
