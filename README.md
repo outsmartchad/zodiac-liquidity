@@ -6,11 +6,11 @@ Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer.
 
 ## Vision
 
-Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden. The same three layers (ZK mixer → ephemeral wallets → relay PDA) apply to every action.
+Zodiac makes Meteora private. Swap, LP, create pools — nobody sees who you are or how much you're moving.
 
-**Today:** Full privacy for LP (deposit/withdraw) with a **single-sign UX** — user signs 1-2 wallet transactions, sends commitment secrets to the operator, and walks away. The operator handles everything else: privacy delay, server-side ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
+**Today:** Private LP. Sign once, walk away. Your deposit gets encrypted and deployed to Meteora automatically.
 
-**Next:** Private swap, private pool creation, and automated fee claiming — all without ARX nodes for swap/fee/close (pure Meteora CPI). Operator will add PostgreSQL, real pool data (Geyser), and multi-service tx landing; frontend will get Swap tab, pool creation page, and real TVL/volume.
+**Next:** Private swaps, private pool creation, fee claiming.
 
 ## The Problem
 
