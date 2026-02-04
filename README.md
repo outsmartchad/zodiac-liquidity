@@ -1,8 +1,6 @@
 # Zodiac Liquidity
 
-**One app that privately does everything on Meteora DAMM v2:** Swap, LP, Create Pools, Claim Fees — so nobody knows who's trading/LPing.
-
-Zodiac Liquidity is a privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token and DAMM v2 pools now. Token-2022, C-SPL token, and DLMM pools coming soon.
+**One app that privately does everything on Meteora DAMM v2:** Swap, LP, Create Pools, Claim Fees — so nobody knows who's trading/LPing powered by Arcium MPC and a ZK mixer. Supports SPL token and DAMM v2 pools now. Token-2022, C-SPL token, and DLMM pools coming soon.
 
 ## Vision
 
