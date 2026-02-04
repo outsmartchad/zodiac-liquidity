@@ -59,7 +59,7 @@ const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 10;
+const MAX_COMPUTATION_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
 // Actual cluster offset read from the on-chain MXE account.
@@ -363,7 +363,7 @@ function deriveEphemeralWalletPda(
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
-  maxRetries: number = 40,
+  maxRetries: number = 5,
   retryDelayMs: number = 1000
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -745,11 +745,11 @@ describe("zodiac-integration", () => {
       // Refresh MXE public key after comp defs
       if (!mxePublicKey || !users[0]?.cipher) {
         console.log("  MXE key not set yet, waiting for keygen...");
-        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 2000);
+        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 2000);
         logHex("  MXE x25519 pubkey (refreshed)", mxePublicKey);
       } else {
         try {
-          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 1000);
+          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
           if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
             mxePublicKey = freshKey;
             logHex("  MXE x25519 pubkey (changed!)", mxePublicKey);

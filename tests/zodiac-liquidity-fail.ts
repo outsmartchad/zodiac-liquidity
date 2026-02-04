@@ -59,7 +59,7 @@ const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 10;
+const MAX_COMPUTATION_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
 // Actual cluster offset read from the on-chain MXE account.
@@ -465,7 +465,7 @@ async function teardownEphemeralWallet(
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
-  maxRetries: number = 10,
+  maxRetries: number = 5,
   retryDelayMs: number = 1000
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -546,6 +546,9 @@ describe("zodiac-liquidity-fail", () => {
   let mxePublicKey: Uint8Array;
   let cipher: RescueCipher;
   let encryptionKeys: { privateKey: Uint8Array; publicKey: Uint8Array };
+
+  // Track relay token accounts for SOL recovery in after() hook
+  const relayTokenAccounts: { relayIndex: number; tokenAccount: PublicKey }[] = [];
 
   before(async () => {
     actualClusterOffset = await readMxeClusterOffset(provider.connection, program.programId);
@@ -644,13 +647,13 @@ describe("zodiac-liquidity-fail", () => {
     // --- Create vault (MPC operation, needed for fail tests) ---
     if (!mxePublicKey || !cipher) {
       console.log("MXE key not set yet, waiting for keygen to complete...");
-      mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
+      mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 2000);
       encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
       const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
       cipher = new RescueCipher(sharedSecret);
     } else {
       try {
-        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 1000);
+        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
         if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
           mxePublicKey = freshKey;
           encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
@@ -740,6 +743,7 @@ describe("zodiac-liquidity-fail", () => {
         relayPda,
         relayTokenKp,
       );
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenAccount });
 
       // Create destination
       const destTokenKp = Keypair.generate();
@@ -853,6 +857,7 @@ describe("zodiac-liquidity-fail", () => {
         relayPda,
         relayTokenKp,
       );
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenAccount });
 
       // Create wrong authority's token account
       const wrongAuthorityTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -933,8 +938,10 @@ describe("zodiac-liquidity-fail", () => {
         // Create relay token accounts
         const relayTokenAKp = Keypair.generate();
         relayTokenA = await createAccount(provider.connection, owner, tokenA, relayPda, relayTokenAKp);
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenA });
         const relayTokenBKp = Keypair.generate();
         relayTokenB = await createAccount(provider.connection, owner, tokenB, relayPda, relayTokenBKp);
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenB });
 
         // Fund relay SPL token via fund_relay (authority mints + transfers)
         const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
@@ -1302,6 +1309,49 @@ describe("zodiac-liquidity-fail", () => {
   });
 
   after(async () => {
+    // Drain and close all tracked relay token accounts
+    for (const { relayIndex: idx, tokenAccount } of relayTokenAccounts) {
+      try {
+        const relayPda = deriveRelayPda(vaultPda, idx, program.programId);
+        const acctInfo = await provider.connection.getAccountInfo(tokenAccount);
+        if (!acctInfo) continue; // already closed
+        const tokenAcct = await getAccount(provider.connection, tokenAccount).catch(() => null);
+        if (tokenAcct && Number(tokenAcct.amount) > 0) {
+          const ownerAta = await getOrCreateAssociatedTokenAccount(
+            provider.connection, owner, tokenAcct.mint, owner.publicKey
+          );
+          await program.methods
+            .relayTransferToDestination(idx, new anchor.BN(tokenAcct.amount.toString()))
+            .accounts({
+              authority: owner.publicKey, vault: vaultPda, relayPda,
+              relayTokenAccount: tokenAccount,
+              destinationTokenAccount: ownerAta.address,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+          console.log(`Drained ${tokenAcct.amount} tokens from relay ${idx} token account`);
+          if (tokenAcct.mint.equals(NATIVE_MINT)) {
+            try {
+              await closeAccount(provider.connection, owner, ownerAta.address, owner.publicKey, owner);
+            } catch {}
+          }
+        }
+        await program.methods
+          .closeRelayTokenAccount(idx)
+          .accounts({
+            authority: owner.publicKey, vault: vaultPda, relayPda,
+            relayTokenAccount: tokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+        console.log(`Closed relay ${idx} token account, rent reclaimed`);
+      } catch (err: any) {
+        console.log(`Could not close relay token account (idx=${idx}):`, err.message?.substring(0, 80));
+      }
+    }
+
     // Withdraw SOL from relay PDAs used in fail tests (indices 1, 3, 7)
     const usedRelayIndices = [1, 3, 7];
     for (const idx of usedRelayIndices) {

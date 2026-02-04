@@ -8,15 +8,15 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 
 ## Project Status
 
-**Phase:** Localnet 39/39 full privacy integration passing + 62/62 (25 mixer + 37 integration). Arcium 0.6.6 upgrade complete. Devnet 25/25 mixer passing (17 SOL + 8 SPL). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening + SPL token mixer tests.
+**Phase:** Arcium 0.7.0 upgrade complete. Devnet 58/58 passing (14 happy-path + 7 fail + 37 integration). Devnet 25/25 mixer passing (17 SOL + 8 SPL). Dual-token deposits + ephemeral wallet auth + SOL-paired pools + relay SOL recovery + mixer security hardening + SPL token mixer tests.
 
-**Current Program ID (devnet):** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
-**Localnet Program ID:** `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`
-**Closed Program IDs (do NOT reuse):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`
+**Current Program ID (devnet):** `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`
+**Localnet Program ID:** `73dLHfZn1aPZvC3rskcaJybPjofBPRk7qEYdH5VEiYwv`
+**Closed Program IDs (do NOT reuse):** `5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`, `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`, `Cwrhs9ch9kQBzcDXr1qajxwap5oZXrZBuZADK8vzS46U`, `77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`
 
 **What's Done:**
 - Project structure created
-- Dependencies configured (Anchor 0.32.1, Arcium 0.6.6)
+- Dependencies configured (Anchor 0.32.1, Arcium 0.7.0)
 - Arcium documentation in `/docs/arcium/`
 - Arcis circuits in `encrypted-ixs/src/lib.rs`
 - Anchor program with Arcium integration complete
@@ -68,6 +68,9 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Devnet (2026-02-02):** Redeployed zodiac_liquidity to `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` with Arcium 0.6.6.
 - **Localnet (2026-02-02):** 39/39 full privacy integration tests passing (mixer + MPC + Meteora, 2 users, Arcium 0.6.6).
 - **Upgraded (2026-02-02):** Arcium SDK 0.6.6 → 0.7.0. v0.7.0 LUT: comp def LUT address must come from MXE account's `lut_offset_slot` (set during InitMxePart2). Tests now use `getLookupTableAddress(programId, mxeAcc.lutOffsetSlot)` and fetch MXE via Arcium program; see [migration v0.6.3→v0.7.0](https://docs.arcium.com/developers/migration/migration-v0.6.3-to-v0.7.0). **MXE init on devnet:** Arcium CLI 0.7.0 has a known bug (CreateLookupTable receives a future slot in InitMxePart2 → "<slot> is not a recent slot"). Workaround: use `arcup install 0.6.6` to run MXE init, or wait for CLI fix.
+- **Devnet (2026-02-04):** Fresh deploy to `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5` with Arcium 0.7.0 CLI + SDK. 58/58 devnet tests passing (14 happy-path + 7 fail + 37 integration). All MPC operations succeed on first attempt. Fixed v0.7.0 MXE keygen issue: previous deploys left MXE `Authority: None` because keygen never completed. Root cause: `arcium deploy` bundles program deploy + MXE init, but InitMxePart2's LUT slot goes stale during the long deploy. Workaround: if `arcium deploy` MXE init fails, run `arcium init-mxe` separately. If keygen is stuck ("Pending confirmations: 2/2"), use `arcium finalize-mxe-keys <program-id> --cluster-offset 456 --keypair-path <key> --rpc-url devnet`. If authority is still None after finalize, the keygen was never processed by ARX nodes — deploy to a fresh program ID.
+- **Improved (2026-02-04):** SOL recovery hardened in `zodiac-liquidity.ts` and `zodiac-liquidity-fail.ts` — added relay token account tracking, draining, and closing in `after()` hooks. All test files now reclaim relay PDA SOL, relay token account rent, relayer wallet SOL, and test user SOL.
+- **Cleanup (2026-02-04):** Removed one-off utility scripts (`init-mxe*.ts`, `check-cluster.ts`, `init-spl-tree.ts`, `update-spl-limit.ts`) and obsolete documentation (`SETUP_CHECKLIST.md`, `AUDIT.md`, `SETUP.md`, `localnet-test-reference.md`, `devnet-test-results.md`, `.cursor/AGENTS.md`).
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -138,9 +141,11 @@ docker exec zodiac-dev bash -c "cd /app && arcium deploy \
 ### Test
 ```bash
 # Localnet (starts validator + ARX nodes)
+# IMPORTANT: Anchor.toml must have cluster = "localnet" for this to work!
 docker exec zodiac-dev bash -c "cd /app && arcium test"
 
 # Devnet (uses existing cluster 456)
+# IMPORTANT: Change Anchor.toml to cluster = "devnet" first!
 docker exec zodiac-dev bash -c "cd /app && arcium test --cluster devnet --skip-build"
 ```
 
@@ -598,6 +603,10 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 35. **Versioned transactions need blockhash retry** - Mixer tests use versioned transactions (for Address Lookup Tables). The `sendAndConfirmVersionedTransaction` helper now retries up to 3× on "Blockhash not found" with a 2s delay between attempts. On retry, it fetches a fresh blockhash and re-signs.
 36. **Arcium 0.6.6 breaking changes** - `queue_computation` dropped the 4th argument (`None` for optional ALT). `init_computation_definition_accounts` macro now requires two new fields: `address_lookup_table: UncheckedAccount` (must be `#[account(mut)]`) and `lut_program: UncheckedAccount`. The `address_lookup_table` is the MXE's LUT PDA derived via `findProgramAddressSync([mxePda, u64_le(0)], AddressLookupTableProgram.programId)`. The `lut_program` is `AddressLookupTableProgram.programId`. Use `arcup install 0.6.6` to update CLI + Docker images together.
 37. **Arcium 0.7.0 LUT** - In v0.7.0 the LUT address is derived from the MXE account's **stored** `lut_offset_slot` (set during InitMxePart2), not slot 0. Tests must: fetch MXE via `getArciumProgram(provider).account.mxeAccount.fetch(mxePda)`, then use `getLookupTableAddress(programId, mxeAcc.lutOffsetSlot)` for comp def init. See [migration v0.6.3→v0.7.0](https://docs.arcium.com/developers/migration/migration-v0.6.3-to-v0.7.0). If MXE init fails on devnet with "<slot> is not a recent slot", the CLI 0.7.0 bug passes a future slot to CreateLookupTable; use CLI 0.6.6 for init or wait for fix.
+38. **Anchor.toml cluster MUST match test target** - `arcium test` reads `[provider] cluster` from Anchor.toml during MXE initialization. If set to `"devnet"` while running localnet tests, the CLI uses devnet RPC for InitMxePart1/Part2, setting `lutOffsetSlot` to a devnet slot (~439M) and clearing `authority` to `None`. This causes all comp def inits to fail with `InvalidAuthority` (error 6000). **Fix:** Set `cluster = "localnet"` before `arcium test`, and `cluster = "devnet"` before `arcium test --cluster devnet`. The voting example in `arcium-hq/examples` uses `cluster = "localnet"`.
+39. **Clean stale .so files after Arcium upgrades** - After upgrading Arcium SDK (e.g., 0.6.3→0.7.0), old `.so` files like `arcium_program_0.6.3.so` remain in `artifacts/`. Remove them: `rm -f /app/artifacts/arcium_program_0.6.*.so`. Only keep the version matching your SDK. Also `rm -f /app/artifacts/*.json` to regenerate fresh genesis accounts for the new version.
+40. **v0.7.0 MXE keygen can silently fail on devnet** — After `arcium deploy` or `arcium init-mxe`, MXE keygen may get stuck ("Pending confirmations: 2/2") and `Authority` stays `None`. Symptoms: all comp def inits fail, `Custom: 3012` errors on queue_computation. Diagnosis: `arcium mxe-info <program-id> --rpc-url devnet` shows `Authority: None`. Fix sequence: (1) Try `arcium finalize-mxe-keys <program-id> --cluster-offset 456 --keypair-path <key> --rpc-url devnet`. (2) Check mxe-info again. (3) If authority is still None, the ARX nodes never processed the keygen — deploy to a fresh program ID with `arcium deploy`. The deploy+MXE bundle sometimes works when the slot timing aligns; retry if needed.
+41. **Track and close relay token accounts in after() hooks** — Relay token accounts created with `createAccount()` inside test blocks leak ~0.002 SOL rent each if not closed. Pattern: push `{relayIndex, tokenAccount}` to a top-level array during test execution; in `after()`, drain any remaining balance via `relayTransferToDestination`, then close via `closeRelayTokenAccount`. See `zodiac-liquidity.ts` and `zodiac-liquidity-fail.ts` for the implementation.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 

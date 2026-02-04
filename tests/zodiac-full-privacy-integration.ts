@@ -81,7 +81,7 @@ const POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 10;
+const MAX_COMPUTATION_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
 const SOL_MINT = new PublicKey("11111111111111111111111111111112");
@@ -512,7 +512,7 @@ function deriveEphemeralWalletPda(vaultPda: PublicKey, walletPubkey: PublicKey, 
 }
 
 async function getMXEPublicKeyWithRetry(
-  provider: anchor.AnchorProvider, programId: PublicKey, maxRetries = 40, retryDelayMs = 1000,
+  provider: anchor.AnchorProvider, programId: PublicKey, maxRetries = 5, retryDelayMs = 1000,
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -756,11 +756,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
   if (!(provider.sendAndConfirm as any).__blockhashRetryPatched) {
     const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
     const patchedFn = async function(tx: any, signers?: any, opts?: any) {
-      for (let attempt = 0; attempt < 10; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         try { return await _origSendAndConfirm(tx, signers, opts); } catch (err: any) {
           const msg = err.message || err.toString();
-          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 9) {
-            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/10)...`);
+          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 4) {
+            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/5)...`);
             await new Promise(r => setTimeout(r, 3000));
             continue;
           }
@@ -1134,11 +1134,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
 
       if (!mxePublicKey || !users[0]?.cipher) {
         console.log("  MXE key not set yet, waiting for keygen...");
-        mxePublicKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 10, 2000);
+        mxePublicKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 5, 2000);
         logHex("  MXE pubkey (refreshed)", mxePublicKey);
       } else {
         try {
-          const freshKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 10, 1000);
+          const freshKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 5, 1000);
           if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
             mxePublicKey = freshKey;
           }

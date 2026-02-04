@@ -59,7 +59,7 @@ const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 10;
+const MAX_COMPUTATION_RETRIES = 5;
 const RETRY_DELAY_MS = 3000;
 
 // Actual cluster offset read from the on-chain MXE account.
@@ -392,7 +392,7 @@ function deriveEphemeralWalletPda(
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
-  maxRetries: number = 10,
+  maxRetries: number = 5,
   retryDelayMs: number = 1000
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -564,6 +564,9 @@ describe("zodiac-liquidity", () => {
   let cipher: RescueCipher;
   let encryptionKeys: { privateKey: Uint8Array; publicKey: Uint8Array };
 
+  // Track relay token accounts for SOL recovery in after() hook
+  const relayTokenAccounts: { relayIndex: number; tokenAccount: PublicKey }[] = [];
+
   before(async () => {
     console.log("=".repeat(60));
     console.log("Zodiac Liquidity Tests - Setup");
@@ -665,13 +668,13 @@ describe("zodiac-liquidity", () => {
     // --- Refresh MXE key + create vault + user position (MPC setup) ---
     if (!mxePublicKey || !cipher) {
       console.log("MXE key not set yet, waiting for keygen to complete...");
-      mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
+      mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 2000);
       encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
       const sharedSecret = x25519.getSharedSecret(encryptionKeys.privateKey, mxePublicKey);
       cipher = new RescueCipher(sharedSecret);
     } else {
       try {
-        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 1000);
+        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
         if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
           mxePublicKey = freshKey;
           encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
@@ -1270,6 +1273,7 @@ describe("zodiac-liquidity", () => {
         relayPda, // authority = relay PDA
         relayTokenKp, // keypair to avoid ATA off-curve error
       );
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenAccount });
       console.log("Relay token account:", relayTokenAccount.toString());
 
       // Create destination token account (e.g. ephemeral wallet)
@@ -1382,6 +1386,7 @@ describe("zodiac-liquidity", () => {
         relayPda,
         relayTokenKp,
       );
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenAccount });
 
       // Create authority token account and mint tokens
       const authorityTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -1472,6 +1477,7 @@ describe("zodiac-liquidity", () => {
           relayPda,
           relayTokenAKp,
         );
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenAPubkey });
         // Token B: WSOL account
         const relayTokenBKp = Keypair.generate();
         relayTokenBPubkey = await createAccount(
@@ -1481,6 +1487,7 @@ describe("zodiac-liquidity", () => {
           relayPda,
           relayTokenBKp,
         );
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenBPubkey });
 
         // Wait for accounts to settle
         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -1701,8 +1708,10 @@ describe("zodiac-liquidity", () => {
       // Create relay token accounts
       const relayTokenAKp = Keypair.generate();
       const relayTokenA = await createAccount(provider.connection, owner, tA, relayPda, relayTokenAKp);
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenA });
       const relayTokenBKp = Keypair.generate();
       const relayTokenB = await createAccount(provider.connection, owner, tB, relayPda, relayTokenBKp);
+      relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenB });
 
       // Fund relay SPL token A (authority mints + transfers)
       const splMint = tA.equals(NATIVE_MINT) ? tB : tA;
@@ -1907,8 +1916,10 @@ describe("zodiac-liquidity", () => {
         // Create relay token accounts
         const relayTokenAKp = Keypair.generate();
         relayTokenA = await createAccount(provider.connection, owner, tokenA, relayPda, relayTokenAKp);
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenA });
         const relayTokenBKp = Keypair.generate();
         relayTokenB = await createAccount(provider.connection, owner, tokenB, relayPda, relayTokenBKp);
+        relayTokenAccounts.push({ relayIndex, tokenAccount: relayTokenB });
 
         // Fund relay SPL token via fund_relay (authority mints + transfers)
         const splMint = tokenA.equals(NATIVE_MINT) ? tokenB : tokenA;
@@ -2251,6 +2262,53 @@ describe("zodiac-liquidity", () => {
   });
 
   after(async () => {
+    // Drain and close all tracked relay token accounts
+    for (const { relayIndex: idx, tokenAccount } of relayTokenAccounts) {
+      try {
+        const relayPda = deriveRelayPda(vaultPda, idx, program.programId);
+        const acctInfo = await provider.connection.getAccountInfo(tokenAccount);
+        if (!acctInfo) continue; // already closed
+        const tokenAcct = await getAccount(provider.connection, tokenAccount).catch(() => null);
+        if (tokenAcct && Number(tokenAcct.amount) > 0) {
+          // Drain remaining tokens back to owner
+          const ownerAta = await getOrCreateAssociatedTokenAccount(
+            provider.connection, owner, tokenAcct.mint, owner.publicKey
+          );
+          await program.methods
+            .relayTransferToDestination(idx, new anchor.BN(tokenAcct.amount.toString()))
+            .accounts({
+              authority: owner.publicKey, vault: vaultPda, relayPda,
+              relayTokenAccount: tokenAccount,
+              destinationTokenAccount: ownerAta.address,
+              tokenProgram: TOKEN_PROGRAM_ID,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+          console.log(`Drained ${tokenAcct.amount} tokens from relay ${idx} token account`);
+          // If it's WSOL, close the owner ATA to reclaim SOL
+          if (tokenAcct.mint.equals(NATIVE_MINT)) {
+            try {
+              await closeAccount(provider.connection, owner, ownerAta.address, owner.publicKey, owner);
+              console.log("Closed owner WSOL ATA, SOL reclaimed");
+            } catch {}
+          }
+        }
+        // Close the relay token account to reclaim rent
+        await program.methods
+          .closeRelayTokenAccount(idx)
+          .accounts({
+            authority: owner.publicKey, vault: vaultPda, relayPda,
+            relayTokenAccount: tokenAccount,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
+        console.log(`Closed relay ${idx} token account, rent reclaimed`);
+      } catch (err: any) {
+        console.log(`Could not close relay token account (idx=${idx}):`, err.message?.substring(0, 80));
+      }
+    }
+
     // Withdraw SOL from all relay PDAs used in tests (indices 0, 2, 4, 5, 6)
     const usedRelayIndices = [0, 2, 4, 5, 6];
     for (const idx of usedRelayIndices) {
@@ -2349,11 +2407,10 @@ describe("zodiac-liquidity", () => {
     const mxePda = getMXEAccAddress(program.programId);
     const arciumProgram = getArciumProgram(program.provider as anchor.AnchorProvider);
     const mxeAcc = await arciumProgram.account.mxeAccount.fetch(mxePda);
-    const rawSlot = mxeAcc.lutOffsetSlot;
-    const lutSlot = rawSlot != null
-      ? (anchor.BN.isBN(rawSlot) ? rawSlot : new anchor.BN(String(rawSlot)))
-      : new anchor.BN(0);
+
+    const lutSlot = mxeAcc.lutOffsetSlot;
     const mxeLutPda = getLookupTableAddress(program.programId, lutSlot);
+    console.log(`  LUT slot: ${lutSlot.toString()}, LUT PDA: ${mxeLutPda.toString()}`);
 
     // @ts-ignore - Dynamic method call
     const sig = await program.methods[methodName]()
