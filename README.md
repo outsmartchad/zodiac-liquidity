@@ -2,11 +2,11 @@
 
 **One app that privately does everything on Meteora DAMM v2:** Swap, LP, Create Pools, Claim Fees — so nobody knows who's trading/LPing.
 
-Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token and DAMM v2 pools now. Token-2022, C-SPL token, and DLMM pools coming soon.
+Zodiac Liquidity is a privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer. Supports SPL token and DAMM v2 pools now. Token-2022, C-SPL token, and DLMM pools coming soon.
 
 ## Vision
 
-Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden.
+Zodiac Liquidity is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden.
 
 **Today:** Private LP. Sign once, walk away. Your deposit gets encrypted and deployed to Meteora automatically.
 
@@ -16,9 +16,9 @@ Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/
 
 On-chain DeFi is fully transparent. Swaps, liquidity provision, and pool creation all expose your wallet, amounts, and strategy. That leaks alpha and makes you a target.
 
-## How Zodiac Solves It
+## How Zodiac Liquidity Solves It
 
-Zodiac combines **MPC encryption** and a **ZK mixer** for full privacy across swap and LP.
+Zodiac Liquidity combines **MPC encryption** and a **ZK mixer** for full privacy across swap and LP.
 
 - **Encrypted state** — Deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
 - **Identity unlinkability** — The ZK mixer breaks the link between user wallets and actions. Single-use ephemeral wallets prevent cross-operation tracing.
