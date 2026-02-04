@@ -12,6 +12,7 @@ import {
   getArciumAccountBaseSeed,
   getArciumProgramId,
   getArciumProgram,
+  getLookupTableAddress,
   RescueCipher,
   deserializeLE,
   getMXEAccAddress,
@@ -47,6 +48,7 @@ import {
   MIN_SQRT_PRICE,
   MAX_SQRT_PRICE,
 } from "@meteora-ag/cp-amm-sdk";
+import { KeypairVault } from "./lib/keypair_vault";
 
 const NUM_RELAYS = 12;
 
@@ -57,8 +59,25 @@ const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 5;
+const MAX_COMPUTATION_RETRIES = 10;
 const RETRY_DELAY_MS = 3000;
+
+// Actual cluster offset read from the on-chain MXE account.
+// In v0.7.0, `arcium test` sets ARCIUM_CLUSTER_OFFSET=0 but initializes the MXE with a different
+// cluster (e.g. 456). We read the real value from the MXE account in before() to stay correct.
+let actualClusterOffset: number;
+
+async function readMxeClusterOffset(
+  connection: anchor.web3.Connection,
+  programId: PublicKey,
+): Promise<number> {
+  const mxeAddr = getMXEAccAddress(programId);
+  const mxeInfo = await connection.getAccountInfo(mxeAddr);
+  if (mxeInfo && mxeInfo.data.length > 12 && mxeInfo.data[8] === 1) {
+    return mxeInfo.data.readUInt32LE(9);
+  }
+  return getArciumEnv().arciumClusterOffset;
+}
 
 // --- File logger ---
 const LOG_FILE = "integration-test-run.log";
@@ -105,7 +124,7 @@ async function queueWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
 ): Promise<string> {
-  const clusterOffset = getArciumEnv().arciumClusterOffset;
+  const clusterOffset = actualClusterOffset;
 
   for (let attempt = 1; attempt <= MAX_COMPUTATION_RETRIES; attempt++) {
     const computationOffset = new anchor.BN(randomBytes(8), "hex");
@@ -217,8 +236,7 @@ function deriveEncryptionKey(
 }
 
 function getClusterAccount(): PublicKey {
-  const arciumEnv = getArciumEnv();
-  return getClusterAccAddress(arciumEnv.arciumClusterOffset);
+  return getClusterAccAddress(actualClusterOffset);
 }
 
 function deriveRelayPda(
@@ -487,13 +505,13 @@ describe("zodiac-integration", () => {
   if (!(provider.sendAndConfirm as any).__blockhashRetryPatched) {
     const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
     const patchedFn = async function(tx: any, signers?: any, opts?: any) {
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 10; attempt++) {
         try {
           return await _origSendAndConfirm(tx, signers, opts);
         } catch (err: any) {
           const msg = err.message || err.toString();
-          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 4) {
-            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/5)...`);
+          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 9) {
+            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/10)...`);
             await new Promise(r => setTimeout(r, 3000));
             continue;
           }
@@ -506,7 +524,7 @@ describe("zodiac-integration", () => {
     provider.sendAndConfirm = patchedFn;
   }
 
-  const clusterAccount = getClusterAccount();
+  let clusterAccount: PublicKey;
   let owner: Keypair;
   let relayer: Keypair;
   let tokenMint: PublicKey;
@@ -571,6 +589,12 @@ describe("zodiac-integration", () => {
 
   before(async () => {
     logSeparator("SETUP: Sequential Multi-User Integration Test");
+
+    // Read the actual cluster offset from the on-chain MXE account (v0.7.0 fix)
+    actualClusterOffset = await readMxeClusterOffset(provider.connection, program.programId);
+    console.log("Cluster offset (from MXE account):", actualClusterOffset);
+    clusterAccount = getClusterAccount();
+
     console.log("");
     console.log(`Testing with ${USER_CONFIGS.length} users (sequential deposit/withdrawal):`);
     for (const cfg of USER_CONFIGS) {
@@ -580,10 +604,10 @@ describe("zodiac-integration", () => {
 
     logKeyValue("Program ID", program.programId.toString());
     logKeyValue("Arcium Program ID", getArciumProgramId().toString());
-    logKeyValue("Cluster offset", getArciumEnv().arciumClusterOffset.toString());
+    logKeyValue("Cluster offset", actualClusterOffset.toString());
     logKeyValue("Cluster account", clusterAccount.toString());
     logKeyValue("MXE account", getMXEAccAddress(program.programId).toString());
-    logKeyValue("Mempool account", getMempoolAccAddress(getArciumEnv().arciumClusterOffset).toString());
+    logKeyValue("Mempool account", getMempoolAccAddress(actualClusterOffset).toString());
 
     owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
     logKeyValue("Owner pubkey", owner.publicKey.toString());
@@ -594,6 +618,9 @@ describe("zodiac-integration", () => {
 
     // Create and fund relayer wallet
     relayer = Keypair.generate();
+    const kpVault = new KeypairVault("zodiac-mpc-meteora-integration");
+    (globalThis as any).__kpVault_integration = kpVault;
+    kpVault.save(relayer, "relayer", 5_000_000_000);
     const relayerFundLamports = 5_000_000_000; // 5 SOL for multiple relay funding cycles
     const fundRelayerTx = new anchor.web3.Transaction().add(
       SystemProgram.transfer({
@@ -637,6 +664,12 @@ describe("zodiac-integration", () => {
     for (let i = 0; i < USER_CONFIGS.length; i++) {
       const cfg = USER_CONFIGS[i];
       const wallet = i === 0 ? owner : Keypair.generate();
+
+      // Persist non-owner keypairs to disk for crash recovery
+      if (i > 0) {
+        const kpVault = (globalThis as any).__kpVault_integration;
+        if (kpVault) kpVault.save(wallet, `user-${cfg.name}`, 100_000_000);
+      }
 
       // Fund non-owner wallets with SOL for tx fees + rent
       if (i > 0) {
@@ -712,11 +745,11 @@ describe("zodiac-integration", () => {
       // Refresh MXE public key after comp defs
       if (!mxePublicKey || !users[0]?.cipher) {
         console.log("  MXE key not set yet, waiting for keygen...");
-        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 120, 2000);
+        mxePublicKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 2000);
         logHex("  MXE x25519 pubkey (refreshed)", mxePublicKey);
       } else {
         try {
-          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
+          const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 1000);
           if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
             mxePublicKey = freshKey;
             logHex("  MXE x25519 pubkey (changed!)", mxePublicKey);
@@ -739,7 +772,7 @@ describe("zodiac-integration", () => {
       await queueWithRetry(
         "createVault",
         async (computationOffset) => {
-          const compAccAddr = getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset);
+          const compAccAddr = getComputationAccAddress(actualClusterOffset, computationOffset);
           return program.methods
             .createVault(computationOffset, nonceBN)
             .accountsPartial({
@@ -751,8 +784,8 @@ describe("zodiac-integration", () => {
               computationAccount: compAccAddr,
               clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()),
               poolAccount: getFeePoolAccAddress(),
               clockAccount: getClockAccAddress(),
@@ -991,11 +1024,11 @@ describe("zodiac-integration", () => {
             tokenMint: tokenMint,
             quoteMint: quoteMint,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1022,11 +1055,11 @@ describe("zodiac-integration", () => {
             authority: owner.publicKey,
             vault: vaultPda,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("reveal_pending_deposits")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1170,11 +1203,11 @@ describe("zodiac-integration", () => {
             authority: owner.publicKey,
             vault: vaultPda,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("record_liquidity")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1206,9 +1239,9 @@ describe("zodiac-integration", () => {
             user: u.wallet.publicKey,
             signPdaAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("compute_withdrawal")).readUInt32LE()),
             clusterAccount,
             poolAccount: getFeePoolAccAddress(),
@@ -1265,11 +1298,11 @@ describe("zodiac-integration", () => {
             vault: vaultPda,
             userPosition: u.positionPda,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("clear_position")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1299,11 +1332,11 @@ describe("zodiac-integration", () => {
             vault: vaultPda,
             userPosition: u.positionPda,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1449,11 +1482,11 @@ describe("zodiac-integration", () => {
               vault: vaultPda,
               userPosition: u.positionPda,
               signPdaAccount,
-              computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+              computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
               clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(program.programId, Buffer.from(getCompDefAccOffset("get_user_position")).readUInt32LE()),
               poolAccount: getFeePoolAccAddress(),
               clockAccount: getClockAccAddress(),
@@ -2028,6 +2061,10 @@ describe("zodiac-integration", () => {
     console.log("  - Ephemeral wallets: Fresh keypair per operation, abandoned after use");
     console.log("  - Sequential batches: Each user's deposit processed independently");
     console.log("");
+    // Clear vault file — all keypairs recovered successfully
+    const kpVault = (globalThis as any).__kpVault_integration;
+    if (kpVault) kpVault.clear();
+
     console.log("=".repeat(60));
     console.log("Integration test complete.");
     console.log("=".repeat(60));
@@ -2054,13 +2091,15 @@ describe("zodiac-integration", () => {
       return "skipped";
     }
 
-    // Derive the MXE LUT PDA (authority=mxePda, recentSlot=0)
+    // v0.7.0: LUT address from MXE account's lut_offset_slot (see migration-v0.6.3-to-v0.7.0)
     const mxePda = getMXEAccAddress(program.programId);
-    const slotBuffer = Buffer.alloc(8); // u64 LE = 0
-    const [mxeLutPda] = PublicKey.findProgramAddressSync(
-      [mxePda.toBuffer(), slotBuffer],
-      AddressLookupTableProgram.programId,
-    );
+    const arciumProgram = getArciumProgram(provider);
+    const mxeAcc = await arciumProgram.account.mxeAccount.fetch(mxePda);
+    const rawSlot = mxeAcc.lutOffsetSlot;
+    const lutSlot = rawSlot != null
+      ? (anchor.BN.isBN(rawSlot) ? rawSlot : new anchor.BN(String(rawSlot)))
+      : new anchor.BN(0);
+    const mxeLutPda = getLookupTableAddress(program.programId, lutSlot);
 
     // @ts-ignore - Dynamic method call
     const sig = await program.methods[methodName]()

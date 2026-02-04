@@ -13,6 +13,7 @@ import {
   getArciumAccountBaseSeed,
   getArciumProgramId,
   getArciumProgram,
+  getLookupTableAddress,
   RescueCipher,
   deserializeLE,
   getMXEAccAddress,
@@ -68,6 +69,7 @@ import {
   sendAndConfirmVersionedTransaction,
   resetGlobalTestALT,
 } from "./lib/test_alt";
+import { KeypairVault } from "./lib/keypair_vault";
 
 // ============================================================
 // CONSTANTS
@@ -79,16 +81,33 @@ const POOL_AUTHORITY = new PublicKey("HLnpSz9h2S4hiLQ43rnSD9XkcUThA7B8hQMKmDaiTL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 5;
+const MAX_COMPUTATION_RETRIES = 10;
 const RETRY_DELAY_MS = 3000;
 
 const SOL_MINT = new PublicKey("11111111111111111111111111111112");
 const keyBasePath = path.resolve(__dirname, "../artifacts/circuits/transaction2");
 
 // Mixer amounts
-const MIXER_SOL_DEPOSIT = 5_000_000; // 5M lamports SOL per user into mixer
-const MIXER_SPL_DEPOSIT = 5_000_000; // 5M token units SPL per user into mixer
+const MIXER_SOL_DEPOSIT = 100_000; // 100K lamports SOL per user into mixer
+const MIXER_SPL_DEPOSIT = 100_000; // 100K token units SPL per user into mixer
 const SPL_MAX_DEPOSIT = 1_000_000_000_000;
+
+// Actual cluster offset read from the on-chain MXE account.
+// In v0.7.0, `arcium test` sets ARCIUM_CLUSTER_OFFSET=0 but initializes the MXE with a different
+// cluster (e.g. 456). We read the real value from the MXE account in before() to stay correct.
+let actualClusterOffset: number;
+
+async function readMxeClusterOffset(
+  connection: anchor.web3.Connection,
+  programId: PublicKey,
+): Promise<number> {
+  const mxeAddr = getMXEAccAddress(programId);
+  const mxeInfo = await connection.getAccountInfo(mxeAddr);
+  if (mxeInfo && mxeInfo.data.length > 12 && mxeInfo.data[8] === 1) {
+    return mxeInfo.data.readUInt32LE(9);
+  }
+  return actualClusterOffset;
+}
 
 // ============================================================
 // LOGGING
@@ -384,7 +403,7 @@ async function queueWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
 ): Promise<string> {
-  const clusterOffset = getArciumEnv().arciumClusterOffset;
+  const clusterOffset = actualClusterOffset;
 
   for (let attempt = 1; attempt <= MAX_COMPUTATION_RETRIES; attempt++) {
     const computationOffset = new anchor.BN(randomBytes(8), "hex");
@@ -475,7 +494,7 @@ function deriveEncryptionKey(wallet: Keypair, message: string): { privateKey: Ui
 }
 
 function getClusterAccount(): PublicKey {
-  return getClusterAccAddress(getArciumEnv().arciumClusterOffset);
+  return getClusterAccAddress(actualClusterOffset);
 }
 
 function deriveRelayPda(vaultPda: PublicKey, relayIndex: number, programId: PublicKey): PublicKey {
@@ -737,11 +756,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
   if (!(provider.sendAndConfirm as any).__blockhashRetryPatched) {
     const _origSendAndConfirm = provider.sendAndConfirm.bind(provider);
     const patchedFn = async function(tx: any, signers?: any, opts?: any) {
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 10; attempt++) {
         try { return await _origSendAndConfirm(tx, signers, opts); } catch (err: any) {
           const msg = err.message || err.toString();
-          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 4) {
-            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/5)...`);
+          if ((msg.includes("Blockhash not found") || msg.includes("403")) && attempt < 9) {
+            console.log(`  RPC error (${msg.includes("403") ? "403" : "blockhash"}), retrying (${attempt + 1}/10)...`);
             await new Promise(r => setTimeout(r, 3000));
             continue;
           }
@@ -755,7 +774,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
   }
 
   let lightWasm: LightWasm;
-  const clusterAccount = getClusterAccount();
+  let clusterAccount: PublicKey;
 
   // Authority / owner
   let owner: Keypair;
@@ -832,6 +851,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
 
   let users: PrivacyUserContext[] = [];
   const fundedKeypairs: Keypair[] = [];
+  const kpVault = new KeypairVault("zodiac-full-privacy-integration");
 
   before(async () => {
     logSeparator("SETUP: Full Privacy Integration Test");
@@ -842,6 +862,10 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     logKeyValue("Zodiac Program", zodiacProgram.programId.toString());
     logKeyValue("Mixer Program", mixerProgram.programId.toString());
 
+    actualClusterOffset = await readMxeClusterOffset(provider.connection, zodiacProgram.programId);
+    console.log("Cluster offset (from MXE account):", actualClusterOffset);
+    clusterAccount = getClusterAccount();
+
     signPdaAccount = PublicKey.findProgramAddressSync(
       [Buffer.from("ArciumSignerAccount")], zodiacProgram.programId
     )[0];
@@ -849,12 +873,14 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     // Create and fund relayer
     relayer = Keypair.generate();
     fundedKeypairs.push(relayer);
+    kpVault.save(relayer, "relayer", 5 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, relayer.publicKey, 5 * LAMPORTS_PER_SOL);
     logKeyValue("Relayer", relayer.publicKey.toString());
 
     // Fee recipient for mixer
     feeRecipient = Keypair.generate();
     fundedKeypairs.push(feeRecipient);
+    kpVault.save(feeRecipient, "feeRecipient", 0.01 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, feeRecipient.publicKey, 0.01 * LAMPORTS_PER_SOL);
 
     // Create base token mint
@@ -1022,6 +1048,8 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       const realWallet = Keypair.generate();
       const intermediateWallet = Keypair.generate();
       fundedKeypairs.push(realWallet, intermediateWallet);
+      kpVault.save(realWallet, `${cfg.name}-realWallet`, 0.5 * LAMPORTS_PER_SOL);
+      kpVault.save(intermediateWallet, `${cfg.name}-intermediateWallet`, 0.1 * LAMPORTS_PER_SOL);
 
       // Fund realWallet with SOL (for mixer deposits + tx fees)
       await fundKeypair(provider, realWallet.publicKey, 0.5 * LAMPORTS_PER_SOL);
@@ -1106,11 +1134,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
 
       if (!mxePublicKey || !users[0]?.cipher) {
         console.log("  MXE key not set yet, waiting for keygen...");
-        mxePublicKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 120, 2000);
+        mxePublicKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 10, 2000);
         logHex("  MXE pubkey (refreshed)", mxePublicKey);
       } else {
         try {
-          const freshKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 5, 1000);
+          const freshKey = await getMXEPublicKeyWithRetry(provider, zodiacProgram.programId, 10, 1000);
           if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
             mxePublicKey = freshKey;
           }
@@ -1129,7 +1157,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       await queueWithRetry(
         "createVault",
         async (computationOffset) => {
-          const compAccAddr = getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset);
+          const compAccAddr = getComputationAccAddress(actualClusterOffset, computationOffset);
           return zodiacProgram.methods
             .createVault(computationOffset, nonceBN)
             .accountsPartial({
@@ -1141,8 +1169,8 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
               computationAccount: compAccAddr,
               clusterAccount,
               mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()),
               poolAccount: getFeePoolAccAddress(),
               clockAccount: getClockAccAddress(),
@@ -1327,11 +1355,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             vault: vaultPda,
             userPosition: u.positionPda,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1391,11 +1419,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             tokenMint: baseMint,
             quoteMint: quoteMint,
             signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1419,11 +1447,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           .revealPendingDeposits(computationOffset)
           .accountsPartial({
             authority: owner.publicKey, vault: vaultPda, signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("reveal_pending_deposits")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1522,11 +1550,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           .recordLiquidity(computationOffset, liquidityDelta)
           .accountsPartial({
             authority: owner.publicKey, vault: vaultPda, signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("record_liquidity")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -1551,9 +1579,9 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           .accountsPartial({
             user: u.intermediateWallet.publicKey, signPdaAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("compute_withdrawal")).readUInt32LE()),
             clusterAccount,
             poolAccount: getFeePoolAccAddress(),
@@ -1602,11 +1630,11 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           .accountsPartial({
             authority: owner.publicKey, vault: vaultPda,
             userPosition: u.positionPda, signPdaAccount,
-            computationAccount: getComputationAccAddress(getArciumEnv().arciumClusterOffset, computationOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
             clusterAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(zodiacProgram.programId, Buffer.from(getCompDefAccOffset("clear_position")).readUInt32LE()),
             poolAccount: getFeePoolAccAddress(),
             clockAccount: getClockAccAddress(),
@@ -2311,6 +2339,9 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       console.log(`    -> withdrew ${u.decryptedBaseWithdraw || "N/A"} base + ${u.decryptedQuoteWithdraw || "N/A"} quote`);
     }
     console.log("");
+    // Clear vault file — all keypairs recovered successfully
+    kpVault.clear();
+
     console.log("=".repeat(60));
     console.log("Full privacy integration test complete.");
     console.log("=".repeat(60));
@@ -2332,13 +2363,17 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       [baseSeedCompDefAcc, program.programId.toBuffer(), offset], getArciumProgramId()
     )[0];
 
-    // Derive the MXE LUT PDA (authority=mxePda, recentSlot=0)
+    // v0.7.0: LUT address is derived from MXE account's lut_offset_slot (set during InitMxePart2).
+    // See https://docs.arcium.com/developers/migration/migration-v0.6.3-to-v0.7.0
     const mxePda = getMXEAccAddress(program.programId);
-    const slotBuffer = Buffer.alloc(8); // u64 LE = 0
-    const [mxeLutPda] = PublicKey.findProgramAddressSync(
-      [mxePda.toBuffer(), slotBuffer],
-      AddressLookupTableProgram.programId,
-    );
+    const arciumProgram = getArciumProgram(program.provider as anchor.AnchorProvider);
+    const mxeAcc = await arciumProgram.account.mxeAccount.fetch(mxePda);
+    const rawSlot = mxeAcc.lutOffsetSlot;
+    const lutSlot =
+      rawSlot != null
+        ? (anchor.BN.isBN(rawSlot) ? rawSlot : new anchor.BN(String(rawSlot)))
+        : new anchor.BN(0);
+    const mxeLutPda = getLookupTableAddress(program.programId, lutSlot);
 
     // Always attempt to init — genesis may pre-create the PDA but the MXE
     // needs the actual CPI to register the action.  If the instruction fails

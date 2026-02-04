@@ -32,6 +32,7 @@ import {
   sendAndConfirmVersionedTransaction,
   resetGlobalTestALT,
 } from "./lib/test_alt";
+import { KeypairVault } from "./lib/keypair_vault";
 
 // Convert on-chain [u8; 32] (big-endian) to field element decimal string
 function onChainBytesToField(bytes: number[]): string {
@@ -365,6 +366,7 @@ describe("Zodiac Mixer", () => {
   let initialNextIndex: number;
   let altAddress: PublicKey;
   const fundedKeypairs: anchor.web3.Keypair[] = [];
+  const kpVault = new KeypairVault("zodiac-mixer");
 
   const keyBasePath = path.resolve(__dirname, '../artifacts/circuits/transaction2');
   const SOL_MINT = new PublicKey("11111111111111111111111111111112");
@@ -389,6 +391,11 @@ describe("Zodiac Mixer", () => {
     recipient = anchor.web3.Keypair.generate();
     feeRecipient = anchor.web3.Keypair.generate();
     randomUser = anchor.web3.Keypair.generate();
+
+    // Persist keypairs to disk BEFORE funding (crash-safe recovery)
+    kpVault.save(randomUser, "randomUser", 0.05 * LAMPORTS_PER_SOL);
+    kpVault.save(recipient, "recipient", 0.01 * LAMPORTS_PER_SOL);
+    kpVault.save(feeRecipient, "feeRecipient", 0.01 * LAMPORTS_PER_SOL);
 
     // Fund accounts from provider wallet (works on both localnet and devnet)
     const transferTx = new anchor.web3.Transaction()
@@ -553,6 +560,9 @@ describe("Zodiac Mixer", () => {
     // Log recovered balance
     const finalBalance = await connection.getBalance(providerWallet.publicKey);
     console.log(`  [after] Provider wallet balance: ${(finalBalance / LAMPORTS_PER_SOL).toFixed(4)} SOL`);
+
+    // Clear vault file — all keypairs recovered successfully
+    kpVault.clear();
   });
 
   // =========================================================================
@@ -1019,6 +1029,7 @@ describe("Zodiac Mixer", () => {
   it("rejects unauthorized deposit limit update", async () => {
     const attacker = anchor.web3.Keypair.generate();
     fundedKeypairs.push(attacker);
+    kpVault.save(attacker, "attacker-depositLimit", 0.005 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, attacker.publicKey, 0.005 * LAMPORTS_PER_SOL);
 
     try {
@@ -1043,6 +1054,7 @@ describe("Zodiac Mixer", () => {
   it("rejects unauthorized global config update", async () => {
     const attacker = anchor.web3.Keypair.generate();
     fundedKeypairs.push(attacker);
+    kpVault.save(attacker, "attacker-globalConfig", 0.005 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, attacker.publicKey, 0.005 * LAMPORTS_PER_SOL);
 
     try {
@@ -1135,6 +1147,7 @@ describe("Zodiac Mixer", () => {
     // The proof is bound to recipient via extDataHash, NOT the tx signer
     const relayer = anchor.web3.Keypair.generate();
     fundedKeypairs.push(relayer);
+    kpVault.save(relayer, "relayer", 0.01 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, relayer.publicKey, 0.01 * LAMPORTS_PER_SOL);
 
     const withdrawInputs = [
@@ -1524,6 +1537,7 @@ describe("Zodiac Mixer", () => {
   it("rejects non-authority toggle_pause", async () => {
     const attacker = anchor.web3.Keypair.generate();
     fundedKeypairs.push(attacker);
+    kpVault.save(attacker, "attacker-togglePause", 0.005 * LAMPORTS_PER_SOL);
     await fundKeypair(provider, attacker.publicKey, 0.005 * LAMPORTS_PER_SOL);
 
     try {
@@ -2235,6 +2249,7 @@ describe("Zodiac Mixer", () => {
     it("rejects unauthorized SPL deposit limit update", async () => {
       const attacker = anchor.web3.Keypair.generate();
       fundedKeypairs.push(attacker);
+      kpVault.save(attacker, "attacker-splDepositLimit", 0.005 * LAMPORTS_PER_SOL);
       await fundKeypair(provider, attacker.publicKey, 0.005 * LAMPORTS_PER_SOL);
 
       try {

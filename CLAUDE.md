@@ -67,6 +67,7 @@ Privacy-focused DeFi liquidity provision for Meteora DAMM v2 pools using Arcium'
 - **Upgraded (2026-02-02):** Arcium SDK 0.6.3 → 0.6.6. Breaking changes: `queue_computation` dropped 4th arg (`None`), `init_computation_definition_accounts` macro now requires `address_lookup_table` (mut) and `lut_program` fields in comp def account structs. All 8 comp def structs and 8 queue_computation calls updated. All 4 test files updated with MXE LUT PDA derivation.
 - **Devnet (2026-02-02):** Redeployed zodiac_liquidity to `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2` with Arcium 0.6.6.
 - **Localnet (2026-02-02):** 39/39 full privacy integration tests passing (mixer + MPC + Meteora, 2 users, Arcium 0.6.6).
+- **Upgraded (2026-02-02):** Arcium SDK 0.6.6 → 0.7.0. v0.7.0 LUT: comp def LUT address must come from MXE account's `lut_offset_slot` (set during InitMxePart2). Tests now use `getLookupTableAddress(programId, mxeAcc.lutOffsetSlot)` and fetch MXE via Arcium program; see [migration v0.6.3→v0.7.0](https://docs.arcium.com/developers/migration/migration-v0.6.3-to-v0.7.0). **MXE init on devnet:** Arcium CLI 0.7.0 has a known bug (CreateLookupTable receives a future slot in InitMxePart2 → "<slot> is not a recent slot"). Workaround: use `arcup install 0.6.6` to run MXE init, or wait for CLI fix.
 
 **Rename (2026-01-29): record_lp_tokens → record_liquidity**
 Meteora DAMM v2 does not use "LP tokens". A user's pool share is tracked via `Position.unlocked_liquidity` (a `u128` in the Position account), not a minted token. Renamed the circuit, instruction, events, and all related code to use "liquidity" terminology.
@@ -91,11 +92,11 @@ The `.idarc` circuit descriptor shows `Shared` parameters require BOTH `arcis_x2
 | Component | Version | Purpose |
 |-----------|---------|---------|
 | Anchor | 0.32.1 | Solana program framework |
-| Arcium | 0.6.6 | MPC privacy layer |
+| Arcium | 0.7.0 | MPC privacy layer |
 | Rust | 1.89.0 | Program language |
-| @arcium-hq/client | 0.6.6 | TypeScript encryption |
+| @arcium-hq/client | 0.7.0 | TypeScript encryption (use `getLookupTableAddress` + MXE `lutOffsetSlot`) |
 | Meteora DAMM v2 | - | Liquidity pool CPI |
-| ARX node Docker | v0.6.6 | Must match Arcium SDK version (pinned via `docker tag`) |
+| ARX node Docker | v0.7.0 | Must match Arcium SDK version (pinned via `docker tag`) |
 
 ## Meteora DAMM v2 Terminology
 
@@ -146,7 +147,7 @@ docker exec zodiac-dev bash -c "cd /app && arcium test --cluster devnet --skip-b
 ### Fresh Devnet Deploy Procedure
 ```bash
 # 1. Generate new keypair
-solana-keygen new -o /root/anchor-building/target/deploy/zodiac_liquidity-keypair.json --force --no-bip39-passphrase
+solana-keygen new -o /root/zodiac/onchain/target/deploy/zodiac_liquidity-keypair.json --force --no-bip39-passphrase
 # Note the pubkey
 
 # 2. Update declare_id! in programs/zodiac_liquidity/src/lib.rs
@@ -197,7 +198,7 @@ https://raw.githubusercontent.com/outsmartchad/zodiac-circuits/main/<circuit_nam
 cd /tmp && git clone https://github.com/outsmartchad/zodiac-circuits.git
 
 # Copy new .arcis files from build directory
-cp /root/anchor-building/build/<circuit_name>.arcis /tmp/zodiac-circuits/
+cp /root/zodiac/onchain/build/<circuit_name>.arcis /tmp/zodiac-circuits/
 
 # Commit and push
 cd /tmp/zodiac-circuits && git add . && git commit -m "Update circuits" && git push origin main
@@ -596,6 +597,7 @@ Arcium has a maximum CU (compute units) limit per circuit. Keep circuits under ~
 34. **Mixer nullifier cross-check mechanism** - The 4-nullifier pattern (`nullifier0..3`) prevents swapped-position double-spend: `nullifier0/1` use `init` (fail if exists), `nullifier2/3` are `SystemAccount` (fail if already owned by mixer program). This means a nullifier used in position 0 can't later be used in position 1 without tripping the cross-check. The `DuplicateNullifier` check is defense-in-depth for same-nullifier-both-positions within a single tx.
 35. **Versioned transactions need blockhash retry** - Mixer tests use versioned transactions (for Address Lookup Tables). The `sendAndConfirmVersionedTransaction` helper now retries up to 3× on "Blockhash not found" with a 2s delay between attempts. On retry, it fetches a fresh blockhash and re-signs.
 36. **Arcium 0.6.6 breaking changes** - `queue_computation` dropped the 4th argument (`None` for optional ALT). `init_computation_definition_accounts` macro now requires two new fields: `address_lookup_table: UncheckedAccount` (must be `#[account(mut)]`) and `lut_program: UncheckedAccount`. The `address_lookup_table` is the MXE's LUT PDA derived via `findProgramAddressSync([mxePda, u64_le(0)], AddressLookupTableProgram.programId)`. The `lut_program` is `AddressLookupTableProgram.programId`. Use `arcup install 0.6.6` to update CLI + Docker images together.
+37. **Arcium 0.7.0 LUT** - In v0.7.0 the LUT address is derived from the MXE account's **stored** `lut_offset_slot` (set during InitMxePart2), not slot 0. Tests must: fetch MXE via `getArciumProgram(provider).account.mxeAccount.fetch(mxePda)`, then use `getLookupTableAddress(programId, mxeAcc.lutOffsetSlot)` for comp def init. See [migration v0.6.3→v0.7.0](https://docs.arcium.com/developers/migration/migration-v0.6.3-to-v0.7.0). If MXE init fails on devnet with "<slot> is not a recent slot", the CLI 0.7.0 bug passes a future slot to CreateLookupTable; use CLI 0.6.6 for init or wait for fix.
 
 ## ARX Node Version Mismatch (AccountDidNotDeserialize)
 
@@ -879,9 +881,9 @@ arcium mxe-info --program-id <program_id> --rpc-url devnet
 
 ## Documentation
 
-- **Arcium docs:** `/root/anchor-building/docs/arcium/`
-- **Quick reference:** `/root/anchor-building/docs/arcium/11-quick-reference.md`
-- **Deployment guide:** `/root/anchor-building/docs/arcium/08-deployment.md`
+- **Arcium docs:** `/root/zodiac/onchain/docs/arcium/`
+- **Quick reference:** `/root/zodiac/onchain/docs/arcium/11-quick-reference.md`
+- **Deployment guide:** `/root/zodiac/onchain/docs/arcium/08-deployment.md`
 - **Skill:** `/root/.claude/skills/arcium-dev/`
 
 ## Invoke Skill

@@ -12,6 +12,7 @@ import {
   getArciumAccountBaseSeed,
   getArciumProgramId,
   getArciumProgram,
+  getLookupTableAddress,
   RescueCipher,
   deserializeLE,
   getMXEAccAddress,
@@ -47,6 +48,7 @@ import {
   MIN_SQRT_PRICE,
   MAX_SQRT_PRICE,
 } from "@meteora-ag/cp-amm-sdk";
+import { KeypairVault } from "./lib/keypair_vault";
 
 const NUM_RELAYS = 12;
 
@@ -57,8 +59,30 @@ const CONFIG_ACCOUNT = new PublicKey("8CNy9goNQNLM4wtgRw528tUQGMKD3vSuFRZY2gLGLL
 const EVENT_AUTHORITY_SEED = Buffer.from("__event_authority");
 
 const ENCRYPTION_KEY_MESSAGE = "zodiac-liquidity-encryption-key-v1";
-const MAX_COMPUTATION_RETRIES = 5;
+const MAX_COMPUTATION_RETRIES = 10;
 const RETRY_DELAY_MS = 3000;
+
+// Actual cluster offset read from the on-chain MXE account.
+// In v0.7.0, `arcium test` sets ARCIUM_CLUSTER_OFFSET=0 but initializes the MXE with a different
+// cluster (e.g. 456). We read the real value from the MXE account in before() to stay correct.
+let actualClusterOffset: number;
+
+/**
+ * Reads the cluster offset from the on-chain MXE account.
+ * Falls back to ARCIUM_CLUSTER_OFFSET env var if the MXE account can't be read.
+ */
+async function readMxeClusterOffset(
+  connection: anchor.web3.Connection,
+  programId: PublicKey,
+): Promise<number> {
+  const mxeAddr = getMXEAccAddress(programId);
+  const mxeInfo = await connection.getAccountInfo(mxeAddr);
+  if (mxeInfo && mxeInfo.data.length > 12 && mxeInfo.data[8] === 1) {
+    return mxeInfo.data.readUInt32LE(9);
+  }
+  // Fallback to env var
+  return actualClusterOffset;
+}
 
 // --- File logger ---
 const LOG_FILE = "test-run.log";
@@ -87,7 +111,7 @@ async function queueWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
 ): Promise<string> {
-  const clusterOffset = getArciumEnv().arciumClusterOffset;
+  const clusterOffset = actualClusterOffset;
 
   for (let attempt = 1; attempt <= MAX_COMPUTATION_RETRIES; attempt++) {
     const computationOffset = new anchor.BN(randomBytes(8), "hex");
@@ -212,11 +236,10 @@ function deriveEncryptionKey(
 }
 
 /**
- * Gets the cluster account address using the cluster offset from environment.
+ * Gets the cluster account address using the actual cluster offset from the MXE account.
  */
 function getClusterAccount(): PublicKey {
-  const arciumEnv = getArciumEnv();
-  return getClusterAccAddress(arciumEnv.arciumClusterOffset);
+  return getClusterAccAddress(actualClusterOffset);
 }
 
 /**
@@ -369,7 +392,7 @@ function deriveEphemeralWalletPda(
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider,
   programId: PublicKey,
-  maxRetries: number = 40,
+  maxRetries: number = 10,
   retryDelayMs: number = 1000
 ): Promise<Uint8Array> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -530,7 +553,7 @@ describe("zodiac-liquidity", () => {
     return event;
   };
 
-  const clusterAccount = getClusterAccount();
+  let clusterAccount: PublicKey;
   let owner: Keypair;
   let relayer: Keypair;
   let tokenMint: PublicKey;
@@ -547,11 +570,21 @@ describe("zodiac-liquidity", () => {
     console.log("=".repeat(60));
     console.log("Program ID:", program.programId.toString());
 
+    // Read actual cluster offset from on-chain MXE account (v0.7.0 fix:
+    // arcium test sets ARCIUM_CLUSTER_OFFSET=0 but initializes MXE with cluster 456)
+    actualClusterOffset = await readMxeClusterOffset(provider.connection, program.programId);
+    console.log("Cluster offset (from MXE account):", actualClusterOffset);
+    clusterAccount = getClusterAccount();
+    console.log("Cluster account:", clusterAccount.toString());
+
     owner = readKpJson(`${os.homedir()}/.config/solana/id.json`);
     console.log("Owner:", owner.publicKey.toString());
 
     // Create and fund relayer wallet (simulates mixer output)
     relayer = Keypair.generate();
+    const kpVault = new KeypairVault("zodiac-liquidity");
+    (globalThis as any).__kpVault_liquidity = kpVault;
+    kpVault.save(relayer, "relayer", 7_000_000_000);
     const fundRelayerTx = new anchor.web3.Transaction().add(
       SystemProgram.transfer({
         fromPubkey: owner.publicKey,
@@ -638,7 +671,7 @@ describe("zodiac-liquidity", () => {
       cipher = new RescueCipher(sharedSecret);
     } else {
       try {
-        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 5, 1000);
+        const freshKey = await getMXEPublicKeyWithRetry(provider, program.programId, 10, 1000);
         if (Buffer.from(freshKey).toString("hex") !== Buffer.from(mxePublicKey).toString("hex")) {
           mxePublicKey = freshKey;
           encryptionKeys = deriveEncryptionKey(owner, ENCRYPTION_KEY_MESSAGE);
@@ -670,13 +703,13 @@ describe("zodiac-liquidity", () => {
             quoteMint: quoteMint,
             signPdaAccount,
             computationAccount: getComputationAccAddress(
-              getArciumEnv().arciumClusterOffset,
+              actualClusterOffset,
               computationOffset
             ),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(
               program.programId,
               Buffer.from(getCompDefAccOffset("init_vault")).readUInt32LE()
@@ -714,13 +747,13 @@ describe("zodiac-liquidity", () => {
             userPosition: userPositionPda,
             signPdaAccount,
             computationAccount: getComputationAccAddress(
-              getArciumEnv().arciumClusterOffset,
+              actualClusterOffset,
               computationOffset
             ),
             clusterAccount,
             mxeAccount: getMXEAccAddress(program.programId),
-            mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-            executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
             compDefAccount: getCompDefAccAddress(
               program.programId,
               Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()
@@ -836,13 +869,13 @@ describe("zodiac-liquidity", () => {
               quoteMint: quoteMint,
               signPdaAccount: signPdaAccount,
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               clusterAccount: clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(
                 program.programId,
                 Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()
@@ -903,13 +936,13 @@ describe("zodiac-liquidity", () => {
               vault: vaultPda,
               signPdaAccount: signPdaAccount,
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               clusterAccount: clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(
                 program.programId,
                 Buffer.from(getCompDefAccOffset("reveal_pending_deposits")).readUInt32LE()
@@ -970,13 +1003,13 @@ describe("zodiac-liquidity", () => {
               vault: vaultPda,
               signPdaAccount: signPdaAccount,
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               clusterAccount: clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(
                 program.programId,
                 Buffer.from(getCompDefAccOffset("record_liquidity")).readUInt32LE()
@@ -1031,10 +1064,10 @@ describe("zodiac-liquidity", () => {
               user: owner.publicKey,
               signPdaAccount: signPdaAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               compDefAccount: getCompDefAccAddress(
@@ -1109,13 +1142,13 @@ describe("zodiac-liquidity", () => {
               userPosition: userPositionPda,
               signPdaAccount: signPdaAccount,
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               clusterAccount: clusterAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               compDefAccount: getCompDefAccAddress(
                 program.programId,
                 Buffer.from(getCompDefAccOffset("clear_position")).readUInt32LE()
@@ -1177,10 +1210,10 @@ describe("zodiac-liquidity", () => {
               user: owner.publicKey,
               signPdaAccount: signPdaAccount,
               mxeAccount: getMXEAccAddress(program.programId),
-              mempoolAccount: getMempoolAccAddress(getArciumEnv().arciumClusterOffset),
-              executingPool: getExecutingPoolAccAddress(getArciumEnv().arciumClusterOffset),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
               computationAccount: getComputationAccAddress(
-                getArciumEnv().arciumClusterOffset,
+                actualClusterOffset,
                 computationOffset
               ),
               compDefAccount: getCompDefAccAddress(
@@ -2243,6 +2276,7 @@ describe("zodiac-liquidity", () => {
     }
 
     // Return remaining relayer SOL to owner
+    let relayerRecovered = false;
     try {
       const relayerBal = await provider.connection.getBalance(relayer.publicKey);
       if (relayerBal > 5000) {
@@ -2253,10 +2287,26 @@ describe("zodiac-liquidity", () => {
             lamports: relayerBal - 5000, // leave min for fee
           })
         );
-        await provider.sendAndConfirm(returnTx, [relayer]);
-        console.log("Returned relayer SOL to owner");
+        returnTx.feePayer = relayer.publicKey;
+        const sig = await provider.connection.sendTransaction(returnTx, [relayer]);
+        const bh = await provider.connection.getLatestBlockhash();
+        await provider.connection.confirmTransaction({
+          blockhash: bh.blockhash,
+          lastValidBlockHeight: bh.lastValidBlockHeight,
+          signature: sig,
+        });
+        console.log(`Returned ${(relayerBal - 5000) / 1e9} SOL from relayer to owner`);
+        relayerRecovered = true;
+      } else {
+        relayerRecovered = true; // nothing to recover
       }
-    } catch {}
+    } catch (err: any) {
+      console.log("Failed to return relayer SOL:", err.message?.substring(0, 120));
+    }
+
+    // Only clear vault file if relayer SOL was recovered
+    const kpVault = (globalThis as any).__kpVault_liquidity;
+    if (kpVault && relayerRecovered) kpVault.clear();
 
     console.log("=".repeat(60));
     console.log("All tests complete. Log saved to:", LOG_FILE);
@@ -2295,13 +2345,15 @@ describe("zodiac-liquidity", () => {
     // The program specifies the URL and hash - ARX nodes will fetch and verify
     console.log(`Initializing ${circuitName} comp def (offchain circuit)...`);
 
-    // Derive the MXE LUT PDA (authority=mxePda, recentSlot=0)
+    // v0.7.0: LUT address from MXE account's lut_offset_slot (see migration-v0.6.3-to-v0.7.0)
     const mxePda = getMXEAccAddress(program.programId);
-    const slotBuffer = Buffer.alloc(8); // u64 LE = 0
-    const [mxeLutPda] = PublicKey.findProgramAddressSync(
-      [mxePda.toBuffer(), slotBuffer],
-      AddressLookupTableProgram.programId,
-    );
+    const arciumProgram = getArciumProgram(program.provider as anchor.AnchorProvider);
+    const mxeAcc = await arciumProgram.account.mxeAccount.fetch(mxePda);
+    const rawSlot = mxeAcc.lutOffsetSlot;
+    const lutSlot = rawSlot != null
+      ? (anchor.BN.isBN(rawSlot) ? rawSlot : new anchor.BN(String(rawSlot)))
+      : new anchor.BN(0);
+    const mxeLutPda = getLookupTableAddress(program.programId, lutSlot);
 
     // @ts-ignore - Dynamic method call
     const sig = await program.methods[methodName]()

@@ -27,7 +27,7 @@
 ## Project Setup
 
 ```bash
-cd /root/anchor-building
+cd /root/zodiac/onchain
 
 # Install dependencies
 yarn install

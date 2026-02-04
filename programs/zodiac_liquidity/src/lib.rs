@@ -42,7 +42,7 @@ const COMP_DEF_OFFSET_WITHDRAW: u32 = comp_def_offset("compute_withdrawal");
 const COMP_DEF_OFFSET_CLEAR_POSITION: u32 = comp_def_offset("clear_position");
 const COMP_DEF_OFFSET_GET_POSITION: u32 = comp_def_offset("get_user_position");
 
-declare_id!("7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2");
+declare_id!("73dLHfZn1aPZvC3rskcaJybPjofBPRk7qEYdH5VEiYwv");
 
 #[arcium_program]
 pub mod zodiac_liquidity {
@@ -1713,9 +1713,10 @@ pub struct InitVaultCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account, checked by arcium program
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1732,9 +1733,10 @@ pub struct InitUserPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1751,9 +1753,10 @@ pub struct InitDepositCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1770,9 +1773,10 @@ pub struct InitRevealPendingCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1789,9 +1793,10 @@ pub struct InitRecordLiquidityCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1808,9 +1813,10 @@ pub struct InitWithdrawCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1827,9 +1833,10 @@ pub struct InitGetPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,
@@ -1846,9 +1853,10 @@ pub struct InitClearPositionCompDef<'info> {
     #[account(mut)]
     /// CHECK: comp_def_account
     pub comp_def_account: UncheckedAccount<'info>,
-    #[account(mut)]
+    #[account(mut, address = derive_mxe_lut_pda!(mxe_account.lut_offset_slot))]
     /// CHECK: address_lookup_table
     pub address_lookup_table: UncheckedAccount<'info>,
+    #[account(address = LUT_PROGRAM_ID)]
     /// CHECK: lut_program
     pub lut_program: UncheckedAccount<'info>,
     pub arcium_program: Program<'info, Arcium>,

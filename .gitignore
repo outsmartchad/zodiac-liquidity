@@ -14,3 +14,4 @@ artifacts/
 logs/
 .cursor/
 .claude/
+.keypair-vault/

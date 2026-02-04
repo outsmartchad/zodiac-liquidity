@@ -80,7 +80,7 @@ Ephemeral --> Zodiac vault (Arcium computes share) --> Relay PDA (remove_liquidi
 | Repo | Description |
 |------|-------------|
 | [zodiac-liquidity](https://github.com/outsmartchad/zodiac-liquidity) (this repo) | On-chain programs, MPC circuits, and tests |
-| [zodiac-relayer](https://github.com/outsmartchad/zodiac-relayer) | Relay service for ZK mixer withdrawals (100 unit tests) |
+| [relayer](https://github.com/outsmartchad/zodiac-relayer) | Relay service for ZK mixer withdrawals (100 unit tests) |
 
 ## Project Structure
 
