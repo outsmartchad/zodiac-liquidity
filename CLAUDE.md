@@ -97,7 +97,7 @@ root_index:     8 bytes  @ offset 4112
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `deposit_fee_rate` | 0 (0%) | Basis points on deposits |
-| `withdrawal_fee_rate` | 25 (0.25%) | On-chain floor. Relayer enforces its own minimum (35 bps / 0.35%) |
+| `withdrawal_fee_rate` | 25 (0.25%) | Basis points on withdrawals |
 | `fee_error_margin` | 500 (5%) | Tolerance for fee amount |
 
 ## Liquidity Instructions (zodiac_liquidity)
