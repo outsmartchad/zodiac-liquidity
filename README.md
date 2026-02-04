@@ -51,7 +51,7 @@ User → App (swap / LP / create pool)
 
 ```
 DEPOSIT:  User --sign--> Mixer --> Vault (MPC encrypt) --> Meteora pool
-WITHDRAW: Vault (MPC compute share) --> Meteora pool --> Destination wallet
+WITHDRAW: User --intent--> Vault (MPC compute share) --> Meteora pool --> Destination wallet
 ```
 
 User signs 1-2 wallet txs to deposit into the mixer, then everything else happens automatically: ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
