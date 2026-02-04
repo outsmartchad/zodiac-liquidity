@@ -8,7 +8,9 @@ Privacy protocol for **traders and LPers** powered by Arcium MPC and a ZK mixer.
 
 Zodiac is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden. The same three layers (ZK mixer → ephemeral wallets → relay PDA) apply to every action.
 
-**Today:** Full privacy for LP (deposit/withdraw). **Next:** Private swap, private pool creation, and automated fee claiming — all without ARX nodes for swap/fee/close (pure Meteora CPI). Operator will add PostgreSQL, real pool data (Geyser), and multi-service tx landing; frontend will get Swap tab, pool creation page, and real TVL/volume.
+**Today:** Full privacy for LP (deposit/withdraw) with a **single-sign UX** — user signs 1-2 wallet transactions, sends commitment secrets to the operator, and walks away. The operator handles everything else: privacy delay, server-side ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
+
+**Next:** Private swap, private pool creation, and automated fee claiming — all without ARX nodes for swap/fee/close (pure Meteora CPI). Operator will add PostgreSQL, real pool data (Geyser), and multi-service tx landing; frontend will get Swap tab, pool creation page, and real TVL/volume.
 
 ## The Problem
 
@@ -45,17 +47,22 @@ User → App (swap / LP / create pool)
        Meteora DAMM v2    Geyser (real-time pool data, optional)
 ```
 
-**LP (current):**
+**LP (current — single-sign flow):**
 
 ```
-DEPOSIT:
-User wallet --> ZK Mixer --> Ephemeral wallet --> Zodiac vault (Arcium encrypts amount)
-                                                                  |
-                                                                  v
-                                                            Relay PDA --> Meteora pool
+DEPOSIT (user signs 1-2 txs, operator handles the rest):
+User wallet --[sign]--> ZK Mixer --[commitment secrets]--> Operator
+                                                              |
+                                    Operator generates ZK proofs (snarkjs)
+                                                              |
+                                    Operator --> Relayer --> ZK Mixer --> Ephemeral wallet
+                                                              |
+                                    Ephemeral --> Zodiac vault (Arcium encrypts)
+                                                              |
+                                                        Relay PDA --> Meteora pool
 
 WITHDRAWAL:
-Ephemeral --> Zodiac vault (Arcium computes share) --> Relay PDA (remove_liquidity) --> Ephemeral --> ZK Mixer --> User
+Operator --> Zodiac vault (Arcium computes share) --> Relay PDA (remove_liquidity) --> Destination
 ```
 
 **Swap / Fee / Close (on-chain ready, operator + UI in progress):** Same relay PDA pattern — operator funds relay, calls `swap_via_relay` / `claim_position_fee_via_relay` / `close_position_via_relay`. No MPC needed for swap; no ARX nodes required.
@@ -80,7 +87,7 @@ Ephemeral --> Zodiac vault (Arcium computes share) --> Relay PDA (remove_liquidi
 | Repo | Description |
 |------|-------------|
 | [zodiac-liquidity](https://github.com/outsmartchad/zodiac-liquidity) (this repo) | On-chain programs, MPC circuits, and tests |
-| [relayer](https://github.com/outsmartchad/zodiac-relayer) | Relay service for ZK mixer withdrawals (100 unit tests) |
+| [zodiac](https://github.com/outsmartchad/zodiac) | Monorepo: operator, app, relayer |
 
 ## Project Structure
 
@@ -106,7 +113,7 @@ See `Anchor.toml` and operator/relayer config for current IDs.
 
 | Program | Network | Program ID |
 |---------|---------|-----------|
-| zodiac_liquidity | Devnet | `73dLHfZn1aPZvC3rskcaJybPjofBPRk7qEYdH5VEiYwv` |
+| zodiac_liquidity | Devnet | `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5` |
 | zodiac_mixer | Devnet | `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` |
 
 ## Test Status
@@ -129,21 +136,27 @@ Implementation order is documented in `.claude/plans/idempotent-whistling-dawn.m
 
 All of the above is testable on localnet without ARX nodes.
 
-## Full Transaction Flow (13 Steps — LP)
+## Full Transaction Flow (Single-Sign LP)
 
 ```
- 1. [user]       mixer.transact(proof)              -- deposit SOL/SPL to mixer
- 2. [relayer]    mixer.transact(proof)              -- withdraw to ephemeral wallet
- 3. [authority]  zodiac.register_ephemeral_wallet() -- register ephemeral wallet PDA
- 4. [ephemeral]  zodiac.deposit(encrypted_amt)      -- deposit to vault
- 5. [authority]  zodiac.reveal_pending_deposits()    -- Arcium reveals aggregate
- 6. [authority]  zodiac.fund_relay(idx, amount)      -- vault -> relay PDA
- 7. [ephemeral]  zodiac.deposit_to_meteora(...)      -- relay PDA -> Meteora add_liquidity
- 8. [authority]  zodiac.record_liquidity(delta)      -- record in Arcium
- --- withdrawal ---
- 9. [ephemeral]  zodiac.withdraw(pubkey, nonce)      -- Arcium computes share
-10. [ephemeral]  zodiac.withdraw_from_meteora(...)   -- relay removes liquidity
-11. [authority]  zodiac.relay_transfer_to_dest()     -- relay -> ephemeral wallet
-12. [authority]  zodiac.clear_position(base, quote)   -- zero Arcium state
-13. [authority]  zodiac.close_ephemeral_wallet()     -- close PDA, reclaim rent
+DEPOSIT (user signs 1-2 txs, operator handles steps 4-13):
+ 1. [user]       mixer.transact(proof)              -- deposit base SPL to mixer (wallet signs)
+ 2. [user]       mixer.transact(proof)              -- deposit quote SOL to mixer (wallet signs)
+ 3. [app]        POST /deposit/private               -- send commitment secrets to operator
+ 4. [operator]   -- waits for privacy delay --       -- anonymity set growth
+ 5. [operator]   generates ZK proofs (snarkjs)       -- server-side Groth16 proof generation
+ 6. [relayer]    mixer.transact(proof)               -- withdraw base + quote to intermediate wallet
+ 7. [authority]  zodiac.register_ephemeral_wallet()  -- register ephemeral wallet PDA
+ 8. [ephemeral]  zodiac.deposit(encrypted_amt)       -- deposit to vault (Arcium encrypts)
+ 9. [authority]  zodiac.reveal_pending_deposits()     -- Arcium reveals aggregate
+10. [authority]  zodiac.fund_relay(idx, amount)       -- vault -> relay PDA
+11. [ephemeral]  zodiac.deposit_to_meteora(...)       -- relay PDA -> Meteora add_liquidity
+12. [authority]  zodiac.record_liquidity(delta)       -- record in Arcium
+
+WITHDRAWAL:
+13. [ephemeral]  zodiac.withdraw(pubkey, nonce)       -- Arcium computes share
+14. [ephemeral]  zodiac.withdraw_from_meteora(...)    -- relay removes liquidity
+15. [authority]  zodiac.relay_transfer_to_dest()      -- relay -> destination wallet
+16. [authority]  zodiac.clear_position(base, quote)    -- zero Arcium state
+17. [authority]  zodiac.close_ephemeral_wallet()      -- close PDA, reclaim rent
 ```

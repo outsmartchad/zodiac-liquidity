@@ -26,38 +26,42 @@
 
 **zodiac_liquidity** — Private liquidity vault. Takes funds from mixer withdrawals, encrypts amounts via Arcium MPC, deploys to Meteora DAMM v2 pools through a relay PDA. Individual deposit sizes stay hidden. Uses ephemeral wallets per operation to prevent cross-operation linkability.
 
-## The 13-Step Privacy Flow
+## The Single-Sign Privacy Flow
 
-This is the full deposit-to-withdrawal lifecycle. The app, operator, and relayer each handle different steps.
+This is the full deposit-to-withdrawal lifecycle. The user signs 1-2 wallet txs, then the operator handles everything else.
 
 ```
 WHO DOES WHAT:
   [app]       = User's browser (wallet signs)
-  [relayer]   = Relayer service (:3002)
   [operator]  = Operator service (:3001)
+  [relayer]   = Relayer service (:3002) — called by operator, not app
   [mpc]       = Arcium ARX nodes (automatic callbacks)
 
-DEPOSIT (Steps 1-9):
-  1. [app]       → mixer.transact(proof)              Deposit SOL/SPL to mixer
-  2. [relayer]   → mixer.transact(proof)              Withdraw to ephemeral wallet
-  3. [operator]  → liquidity.register_ephemeral()     Register ephemeral wallet PDA
-  4. [operator]  → liquidity.deposit(encrypted_amt)   Encrypt deposit via MPC
-  5. [mpc]       → liquidity.deposit_callback()       MPC updates vault + position
-  6. [operator]  → liquidity.reveal_pending()         MPC reveals aggregate amounts
-  7. [operator]  → liquidity.fund_relay(amount)       Move tokens to relay PDA
-  8. [operator]  → liquidity.deposit_to_meteora()     Relay PDA adds liquidity to Meteora
-  9. [operator]  → liquidity.record_liquidity(delta)  MPC records liquidity share
+DEPOSIT (Steps 1-13):
+  1. [app]       → mixer.transact(proof)              Deposit base SPL to mixer (wallet signs)
+  2. [app]       → mixer.transact(proof)              Deposit quote SOL to mixer (wallet signs)
+  3. [app]       → operator POST /deposit/private      Send commitment secrets to operator
+  4. [operator]  — waits for privacy delay              Anonymity set growth
+  5. [operator]  → generates ZK proofs (snarkjs)        Server-side Groth16 proof generation
+  6. [operator]  → relayer POST /relay/withdraw         Withdraw base + quote from mixer
+  7. [operator]  → liquidity.register_ephemeral()       Register ephemeral wallet PDA
+  8. [operator]  → liquidity.deposit(encrypted_amt)     Encrypt deposit via MPC
+  9. [mpc]       → liquidity.deposit_callback()         MPC updates vault + position
+ 10. [operator]  → liquidity.reveal_pending()           MPC reveals aggregate amounts
+ 11. [operator]  → liquidity.fund_relay(amount)         Move tokens to relay PDA
+ 12. [operator]  → liquidity.deposit_to_meteora()       Relay PDA adds liquidity to Meteora
+ 13. [operator]  → liquidity.record_liquidity(delta)    MPC records liquidity share
 
-WITHDRAWAL (Steps 10-13):
- 10. [operator]  → liquidity.withdraw(pubkey, nonce)  MPC computes user's share
- 11. [operator]  → liquidity.withdraw_from_meteora()  Relay removes liquidity
- 12. [operator]  → liquidity.relay_transfer_to_dest() Move tokens to ephemeral wallet
- 13. [operator]  → liquidity.clear_position()         Zero out MPC state + close ephemeral
+WITHDRAWAL (Steps 14-17):
+ 14. [operator]  → liquidity.withdraw(pubkey, nonce)    MPC computes user's share
+ 15. [operator]  → liquidity.withdraw_from_meteora()    Relay removes liquidity
+ 16. [operator]  → liquidity.relay_transfer_to_dest()   Move tokens to ephemeral wallet
+ 17. [operator]  → liquidity.clear_position()           Zero out MPC state + close ephemeral
 ```
 
 ## Mixer Instructions (zodiac_mixer)
 
-The app calls these directly. The relayer also calls `transact`/`transact_spl` for withdrawals.
+The app calls deposit instructions directly (wallet signs). The operator generates ZK proofs and calls the relayer for withdrawals. The relayer calls `transact`/`transact_spl` for the actual on-chain withdrawal tx.
 
 | Instruction | Who Calls | Purpose |
 |-------------|-----------|---------|
@@ -211,7 +215,7 @@ Never use `anchor build`, `cargo build`, or `solana program deploy` directly.
 | `target/idl/zodiac_mixer.json` | Mixer IDL (copy to app as needed) |
 | `target/idl/zodiac_liquidity.json` | Liquidity IDL (used by operator) |
 | `tests/zodiac-mixer.ts` | 25 mixer tests — reference for how to call mixer instructions |
-| `tests/zodiac-mpc-meteora-integration.ts` | 37 integration tests — reference for full 13-step flow |
+| `tests/zodiac-mpc-meteora-integration.ts` | 37 integration tests — reference for full privacy flow |
 | `tests/zodiac-full-privacy-integration.ts` | 39 tests — mixer + MPC + Meteora combined |
 
 ## Arcium v0.7.0 Upgrade History
