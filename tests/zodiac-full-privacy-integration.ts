@@ -364,39 +364,6 @@ async function withBlockhashRetry<T>(fn: () => Promise<T>, retries = 3, delayMs 
   throw new Error("withBlockhashRetry: unreachable");
 }
 
-async function sendWithEphemeralPayer(
-  provider: anchor.AnchorProvider,
-  tx: Transaction,
-  signers: Keypair[],
-): Promise<string> {
-  const connection = provider.connection;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash("confirmed");
-      tx.recentBlockhash = blockhash;
-      tx.lastValidBlockHeight = lastValidBlockHeight;
-      tx.feePayer = signers[0].publicKey;
-      tx.sign(...signers);
-      const rawTx = tx.serialize();
-      const sig = await connection.sendRawTransaction(rawTx, { skipPreflight: false, preflightCommitment: "confirmed" });
-      await connection.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, "confirmed");
-      return sig;
-    } catch (err: any) {
-      const msg = err.message || err.toString();
-      if (msg.includes("Blockhash not found") && attempt < 2) {
-        console.log(`  Blockhash expired (ephemeral payer), retrying (${attempt + 1}/3)...`);
-        await new Promise(r => setTimeout(r, 2000));
-        const freshTx = new Transaction();
-        freshTx.instructions = tx.instructions;
-        tx = freshTx;
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error("sendWithEphemeralPayer: unreachable");
-}
-
 async function queueWithRetry(
   label: string,
   buildAndSend: (computationOffset: anchor.BN) => Promise<string>,
@@ -504,13 +471,6 @@ function deriveRelayPda(vaultPda: PublicKey, relayIndex: number, programId: Publ
   return pda;
 }
 
-function deriveEphemeralWalletPda(vaultPda: PublicKey, walletPubkey: PublicKey, programId: PublicKey): PublicKey {
-  const [pda] = PublicKey.findProgramAddressSync(
-    [Buffer.from("ephemeral"), vaultPda.toBuffer(), walletPubkey.toBuffer()], programId
-  );
-  return pda;
-}
-
 async function getMXEPublicKeyWithRetry(
   provider: anchor.AnchorProvider, programId: PublicKey, maxRetries = 5, retryDelayMs = 1000,
 ): Promise<Uint8Array> {
@@ -527,65 +487,6 @@ async function getMXEPublicKeyWithRetry(
     }
   }
   throw new Error(`Failed to fetch MXE public key after ${maxRetries} attempts`);
-}
-
-async function setupEphemeralWallet(
-  program: Program<ZodiacLiquidity>,
-  provider: anchor.AnchorProvider,
-  owner: Keypair,
-  vaultPda: PublicKey,
-  fundLamports: number = 200_000_000,
-): Promise<{ ephemeralKp: Keypair; ephemeralPda: PublicKey }> {
-  const ephemeralKp = Keypair.generate();
-  const ephemeralPda = deriveEphemeralWalletPda(vaultPda, ephemeralKp.publicKey, program.programId);
-
-  await program.methods
-    .registerEphemeralWallet()
-    .accounts({
-      authority: owner.publicKey,
-      vault: vaultPda,
-      wallet: ephemeralKp.publicKey,
-      ephemeralWallet: ephemeralPda,
-      systemProgram: SystemProgram.programId,
-    })
-    .signers([owner])
-    .rpc({ commitment: "confirmed" });
-
-  const fundTx = new Transaction().add(
-    SystemProgram.transfer({ fromPubkey: owner.publicKey, toPubkey: ephemeralKp.publicKey, lamports: fundLamports })
-  );
-  await provider.sendAndConfirm(fundTx, [owner]);
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  console.log("Ephemeral wallet created:", ephemeralKp.publicKey.toString());
-  return { ephemeralKp, ephemeralPda };
-}
-
-async function teardownEphemeralWallet(
-  program: Program<ZodiacLiquidity>,
-  provider: anchor.AnchorProvider,
-  owner: Keypair,
-  vaultPda: PublicKey,
-  ephemeralKp: Keypair,
-  ephemeralPda: PublicKey,
-): Promise<void> {
-  try {
-    const ephBal = await provider.connection.getBalance(ephemeralKp.publicKey);
-    if (ephBal > 5000) {
-      const returnTx = new Transaction().add(
-        SystemProgram.transfer({ fromPubkey: ephemeralKp.publicKey, toPubkey: owner.publicKey, lamports: ephBal - 5000 })
-      );
-      await sendWithEphemeralPayer(provider, returnTx, [ephemeralKp]);
-    }
-  } catch (err: any) {
-    console.log("Could not return ephemeral SOL:", err.message?.substring(0, 80));
-  }
-
-  await program.methods
-    .closeEphemeralWallet()
-    .accounts({ authority: owner.publicKey, vault: vaultPda, ephemeralWallet: ephemeralPda })
-    .signers([owner])
-    .rpc({ commitment: "confirmed" });
 }
 
 function parseEventsFromTx(
@@ -829,12 +730,13 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
   let feeRecipient: Keypair;
   let feeRecipientAta: PublicKey;
 
-  // User contexts
+  // User contexts (authority-first: authority signs vault operations, users identified by user_id_hash)
   interface PrivacyUserContext {
     name: string;
+    userId: string;
+    userIdHash: Buffer;
     realWallet: Keypair;
-    intermediateWallet: Keypair;
-    // Zodiac encryption
+    // Zodiac encryption (derived from authority key)
     encryptionKeys: { privateKey: Uint8Array; publicKey: Uint8Array };
     cipher: RescueCipher;
     positionPda: PublicKey;
@@ -1037,25 +939,22 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     console.log("  SPL ALT created:", splAltAddress.toString());
     resetGlobalTestALT();
 
-    // === Create 2 user contexts ===
+    // === Create 2 user contexts (authority-first) ===
     logSeparator("USER CONTEXT CREATION");
     const userConfigs = [
-      { name: "User1", splDeposit: MIXER_SPL_DEPOSIT, solDeposit: MIXER_SOL_DEPOSIT },
-      { name: "User2", splDeposit: MIXER_SPL_DEPOSIT, solDeposit: MIXER_SOL_DEPOSIT },
+      { name: "User1", userId: "privacy-user1", splDeposit: MIXER_SPL_DEPOSIT, solDeposit: MIXER_SOL_DEPOSIT },
+      { name: "User2", userId: "privacy-user2", splDeposit: MIXER_SPL_DEPOSIT, solDeposit: MIXER_SOL_DEPOSIT },
     ];
 
     for (const cfg of userConfigs) {
       const realWallet = Keypair.generate();
-      const intermediateWallet = Keypair.generate();
-      fundedKeypairs.push(realWallet, intermediateWallet);
+      fundedKeypairs.push(realWallet);
       kpVault.save(realWallet, `${cfg.name}-realWallet`, 0.5 * LAMPORTS_PER_SOL);
-      kpVault.save(intermediateWallet, `${cfg.name}-intermediateWallet`, 0.1 * LAMPORTS_PER_SOL);
+
+      const userIdHash = createHash("sha256").update(cfg.userId).digest();
 
       // Fund realWallet with SOL (for mixer deposits + tx fees)
       await fundKeypair(provider, realWallet.publicKey, 0.5 * LAMPORTS_PER_SOL);
-
-      // Fund intermediateWallet with SOL for tx fees
-      await fundKeypair(provider, intermediateWallet.publicKey, 0.2 * LAMPORTS_PER_SOL);
 
       // Mint SPL tokens to realWallet for mixer deposit
       const realWalletAta = await createAssociatedTokenAccountIdempotent(
@@ -1063,12 +962,12 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       );
       await mintTo(provider.connection, owner, baseMint, realWalletAta, owner, cfg.splDeposit * 2);
 
-      // Create intermediateWallet ATAs
-      await createAssociatedTokenAccountIdempotent(provider.connection, owner, baseMint, intermediateWallet.publicKey);
-      await createAssociatedTokenAccountIdempotent(provider.connection, owner, NATIVE_MINT, intermediateWallet.publicKey);
+      // Create authority ATAs for receiving mixer withdrawals
+      await createAssociatedTokenAccountIdempotent(provider.connection, owner, baseMint, owner.publicKey);
+      await createAssociatedTokenAccountIdempotent(provider.connection, owner, NATIVE_MINT, owner.publicKey);
 
-      // Encryption keys (derived from intermediateWallet since that's the zodiac depositor)
-      const encKeys = deriveEncryptionKey(intermediateWallet, ENCRYPTION_KEY_MESSAGE);
+      // Encryption keys (derived from authority for this user)
+      const encKeys = deriveEncryptionKey(owner, `${ENCRYPTION_KEY_MESSAGE}-${cfg.userId}`);
       let cipher: RescueCipher = null as any;
       if (mxePublicKey) {
         const sharedSecret = x25519.getSharedSecret(encKeys.privateKey, mxePublicKey);
@@ -1076,7 +975,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       }
 
       const [positionPdaAddr] = PublicKey.findProgramAddressSync(
-        [Buffer.from("position"), vaultPda.toBuffer(), intermediateWallet.publicKey.toBuffer()],
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
         zodiacProgram.programId
       );
 
@@ -1086,8 +985,9 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
 
       users.push({
         name: cfg.name,
+        userId: cfg.userId,
+        userIdHash,
         realWallet,
-        intermediateWallet,
         encryptionKeys: encKeys,
         cipher,
         positionPda: positionPdaAddr,
@@ -1096,7 +996,8 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       });
 
       logKeyValue(`${cfg.name} realWallet`, realWallet.publicKey.toString());
-      logKeyValue(`${cfg.name} intermediateWallet`, intermediateWallet.publicKey.toString());
+      logKeyValue(`${cfg.name} userId`, cfg.userId);
+      logHex(`${cfg.name} userIdHash`, userIdHash);
       logKeyValue(`${cfg.name} base after fee`, splAfterFee);
       logKeyValue(`${cfg.name} quote after fee`, solAfterFee);
     }
@@ -1263,7 +1164,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       );
       [eventAuthority] = PublicKey.findProgramAddressSync([EVENT_AUTHORITY_SEED], DAMM_V2_PROGRAM_ID);
 
-      // Create pool via ephemeral wallet
+      // Create pool (authority signs directly)
       const poolNftMint = Keypair.generate();
       const [poolPosition] = PublicKey.findProgramAddressSync(
         [Buffer.from("position"), poolNftMint.publicKey.toBuffer()], DAMM_V2_PROGRAM_ID
@@ -1279,15 +1180,14 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       };
       const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
-      const poolEph = await setupEphemeralWallet(zodiacProgram, provider, owner, vaultPda);
-      const poolTx = await zodiacProgram.methods
+      await zodiacProgram.methods
         .createCustomizablePoolViaRelay(
           RELAY_INDEX, poolFees,
           new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
           false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
         )
         .accounts({
-          payer: poolEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: poolEph.ephemeralPda, relayPda,
+          payer: owner.publicKey, vault: vaultPda, relayPda,
           positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
           poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
           tokenAMint: tokenA, tokenBMint: tokenB,
@@ -1297,14 +1197,13 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           token2022Program: TOKEN_2022_PROGRAM_ID,
           systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
         })
-        .transaction();
-      await sendWithEphemeralPayer(provider, poolTx, [poolEph.ephemeralKp, poolNftMint]);
+        .signers([owner, poolNftMint])
+        .rpc({ commitment: "confirmed" });
       console.log("  Pool created:", poolPda.toString());
-      await teardownEphemeralWallet(zodiacProgram, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
 
       await new Promise(r => setTimeout(r, 10000));
 
-      // Create position via ephemeral wallet
+      // Create position (authority signs directly)
       posNftMint = Keypair.generate();
       [positionPda] = PublicKey.findProgramAddressSync(
         [Buffer.from("position"), posNftMint.publicKey.toBuffer()], DAMM_V2_PROGRAM_ID
@@ -1318,11 +1217,10 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
         zodiacProgram.programId
       );
 
-      const posEph = await setupEphemeralWallet(zodiacProgram, provider, owner, vaultPda);
-      const posTx = await zodiacProgram.methods
+      await zodiacProgram.methods
         .createMeteoraPosition(RELAY_INDEX)
         .accounts({
-          payer: posEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: posEph.ephemeralPda, relayPda,
+          payer: owner.publicKey, vault: vaultPda, relayPda,
           relayPositionTracker,
           positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
           pool: poolPda, position: positionPda,
@@ -1330,10 +1228,9 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
           tokenProgram: TOKEN_2022_PROGRAM_ID,
           systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
         })
-        .transaction();
-      await sendWithEphemeralPayer(provider, posTx, [posEph.ephemeralKp, posNftMint]);
+        .signers([owner, posNftMint])
+        .rpc({ commitment: "confirmed" });
       console.log("  Position created:", positionPda.toString());
-      await teardownEphemeralWallet(zodiacProgram, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
     });
   });
 
@@ -1346,12 +1243,16 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     const nonceBN = new anchor.BN(deserializeLE(nonce).toString());
 
     await queueWithRetry(
-      `createUserPosition(${u.name})`,
+      `createUserPositionByAuthority(${u.name})`,
       async (computationOffset) => {
         return zodiacProgram.methods
-          .createUserPosition(computationOffset, nonceBN)
+          .createUserPositionByAuthority(
+            Array.from(u.userIdHash) as number[],
+            computationOffset,
+            nonceBN
+          )
           .accountsPartial({
-            user: u.intermediateWallet.publicKey,
+            authority: owner.publicKey,
             vault: vaultPda,
             userPosition: u.positionPda,
             signPdaAccount,
@@ -1365,7 +1266,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             clockAccount: getClockAccAddress(),
             systemProgram: SystemProgram.programId,
           })
-          .signers([u.intermediateWallet])
+          .signers([owner])
           .rpc({ skipPreflight: true, commitment: "confirmed" });
       },
       provider,
@@ -1373,12 +1274,12 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     );
 
     const posAccount = await zodiacProgram.account.userPositionAccount.fetch(u.positionPda);
-    expect(posAccount.owner.toString()).to.equal(u.intermediateWallet.publicKey.toString());
-    console.log(`  ${u.name} position created`);
+    expect(posAccount.owner.toString()).to.equal(new PublicKey(u.userIdHash).toString());
+    console.log(`  ${u.name} position created (by authority)`);
   }
 
   async function depositUserMPC(u: PrivacyUserContext): Promise<void> {
-    logSeparator(`MPC: deposit for ${u.name} (${u.baseDepositAmount} base + ${u.quoteDepositAmount} quote)`);
+    logSeparator(`MPC: depositByAuthority for ${u.name} (${u.baseDepositAmount} base + ${u.quoteDepositAmount} quote)`);
     await new Promise(r => setTimeout(r, 3000));
 
     const baseDepositAmount = BigInt(u.baseDepositAmount);
@@ -1387,19 +1288,20 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     const nonceBN = new anchor.BN(deserializeLE(nonce).toString());
     const ciphertext = u.cipher.encrypt([baseDepositAmount, quoteDepositAmount], nonce);
 
-    // intermediateWallet already has the SPL tokens (from mixer withdrawal)
-    const userTokenAccount = await getOrCreateAssociatedTokenAccount(
-      provider.connection, owner, baseMint, u.intermediateWallet.publicKey
+    // Authority's token accounts (authority received tokens from mixer withdrawal)
+    const authorityTokenAccount = await getOrCreateAssociatedTokenAccount(
+      provider.connection, owner, baseMint, owner.publicKey
     );
-    const userQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
-      provider.connection, owner, NATIVE_MINT, u.intermediateWallet.publicKey
+    const authorityQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+      provider.connection, owner, NATIVE_MINT, owner.publicKey
     );
 
     await queueWithRetry(
-      `deposit(${u.name})`,
+      `depositByAuthority(${u.name})`,
       async (computationOffset) => {
         return zodiacProgram.methods
-          .deposit(
+          .depositByAuthority(
+            Array.from(u.userIdHash) as number[],
             computationOffset,
             Array.from(ciphertext[0]) as number[],
             Array.from(ciphertext[1]) as number[],
@@ -1409,12 +1311,12 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             new anchor.BN(quoteDepositAmount.toString())
           )
           .accountsPartial({
-            depositor: u.intermediateWallet.publicKey,
+            authority: owner.publicKey,
             vault: vaultPda,
             userPosition: u.positionPda,
-            userTokenAccount: userTokenAccount.address,
+            authorityTokenAccount: authorityTokenAccount.address,
             vaultTokenAccount: vaultTokenAccount,
-            userQuoteTokenAccount: userQuoteTokenAccount.address,
+            authorityQuoteTokenAccount: authorityQuoteTokenAccount.address,
             vaultQuoteTokenAccount: vaultQuoteTokenAccount,
             tokenMint: baseMint,
             quoteMint: quoteMint,
@@ -1430,13 +1332,13 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             tokenProgram: TOKEN_PROGRAM_ID,
             systemProgram: SystemProgram.programId,
           })
-          .signers([u.intermediateWallet])
+          .signers([owner])
           .rpc({ skipPreflight: true, commitment: "confirmed" });
       },
       provider,
       zodiacProgram.programId,
     );
-    console.log(`  ${u.name} deposited ${u.baseDepositAmount} base + ${u.quoteDepositAmount} quote to Zodiac`);
+    console.log(`  ${u.name} deposited ${u.baseDepositAmount} base + ${u.quoteDepositAmount} quote to Zodiac (via authority)`);
   }
 
   async function revealPending(): Promise<{ base: number; quote: number }> {
@@ -1503,43 +1405,38 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
 
   async function depositToMeteora(): Promise<{ u64Delta: anchor.BN; meteoraDelta: anchor.BN }> {
     await new Promise(r => setTimeout(r, 3000));
-    const depEph = await setupEphemeralWallet(zodiacProgram, provider, owner, vaultPda);
 
-    try {
-      const splBal = await withRetry(() => getAccount(provider.connection, relaySplAccount));
-      const wsolBal = await withRetry(() => getAccount(provider.connection, relayWsolAccount));
-      const depositTokenAmount = Math.min(Number(splBal.amount), Number(wsolBal.amount));
+    const splBal = await withRetry(() => getAccount(provider.connection, relaySplAccount));
+    const wsolBal = await withRetry(() => getAccount(provider.connection, relayWsolAccount));
+    const depositTokenAmount = Math.min(Number(splBal.amount), Number(wsolBal.amount));
 
-      const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
-      const liquidityDelta = calculateLiquidityFromAmounts(
-        provider.connection,
-        new anchor.BN(depositTokenAmount), new anchor.BN(depositTokenAmount), sqrtPrice,
-      );
+    const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
+    const liquidityDelta = calculateLiquidityFromAmounts(
+      provider.connection,
+      new anchor.BN(depositTokenAmount), new anchor.BN(depositTokenAmount), sqrtPrice,
+    );
 
-      const depTx = await zodiacProgram.methods
-        .depositToMeteoraDammV2(RELAY_INDEX, liquidityDelta, new anchor.BN("18446744073709551615"), new anchor.BN("18446744073709551615"), null)
-        .accounts({
-          payer: depEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: depEph.ephemeralPda, relayPda,
-          pool: poolPda, position: positionPda,
-          relayTokenA, relayTokenB, tokenAVault, tokenBVault,
-          tokenAMint: tokenA, tokenBMint: tokenB,
-          positionNftAccount: posNftAccount,
-          tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
-        })
-        .transaction();
-      await sendWithEphemeralPayer(provider, depTx, [depEph.ephemeralKp]);
+    await zodiacProgram.methods
+      .depositToMeteoraDammV2(RELAY_INDEX, liquidityDelta, new anchor.BN("18446744073709551615"), new anchor.BN("18446744073709551615"), null)
+      .accounts({
+        payer: owner.publicKey, vault: vaultPda, relayPda,
+        pool: poolPda, position: positionPda,
+        relayTokenA, relayTokenB, tokenAVault, tokenBVault,
+        tokenAMint: tokenA, tokenBMint: tokenB,
+        positionNftAccount: posNftAccount,
+        tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
+        systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+      })
+      .signers([owner])
+      .rpc({ commitment: "confirmed" });
 
-      const positionInfo = await withRetry(() => provider.connection.getAccountInfo(positionPda));
-      const currentUnlockedLiquidity = new anchor.BN(positionInfo!.data.slice(152, 168), "le");
-      const actualDelta = currentUnlockedLiquidity.sub(cumulativeMeteoraLiquidity);
-      const U64_MAX = new anchor.BN("18446744073709551615");
-      const deltaAsU64 = actualDelta.gt(U64_MAX) ? U64_MAX : actualDelta;
+    const positionInfo = await withRetry(() => provider.connection.getAccountInfo(positionPda));
+    const currentUnlockedLiquidity = new anchor.BN(positionInfo!.data.slice(152, 168), "le");
+    const actualDelta = currentUnlockedLiquidity.sub(cumulativeMeteoraLiquidity);
+    const U64_MAX = new anchor.BN("18446744073709551615");
+    const deltaAsU64 = actualDelta.gt(U64_MAX) ? U64_MAX : actualDelta;
 
-      return { u64Delta: deltaAsU64, meteoraDelta: actualDelta };
-    } finally {
-      await teardownEphemeralWallet(zodiacProgram, provider, owner, vaultPda, depEph.ephemeralKp, depEph.ephemeralPda);
-    }
+    return { u64Delta: deltaAsU64, meteoraDelta: actualDelta };
   }
 
   async function recordLiquidity(liquidityDelta: anchor.BN): Promise<void> {
@@ -1572,12 +1469,17 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     const sharedNonceBN = new anchor.BN(deserializeLE(sharedNonce).toString());
 
     const finalizeSig = await queueWithRetry(
-      `computeWithdrawal(${u.name})`,
+      `computeWithdrawalByAuthority(${u.name})`,
       async (computationOffset) => {
         return zodiacProgram.methods
-          .withdraw(computationOffset, Array.from(u.encryptionKeys.publicKey) as number[], sharedNonceBN)
+          .computeWithdrawalByAuthority(
+            Array.from(u.userIdHash) as number[],
+            computationOffset,
+            Array.from(u.encryptionKeys.publicKey) as number[],
+            sharedNonceBN
+          )
           .accountsPartial({
-            user: u.intermediateWallet.publicKey, signPdaAccount,
+            authority: owner.publicKey, signPdaAccount,
             mxeAccount: getMXEAccAddress(zodiacProgram.programId),
             mempoolAccount: getMempoolAccAddress(actualClusterOffset),
             executingPool: getExecutingPoolAccAddress(actualClusterOffset),
@@ -1590,7 +1492,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
             vault: vaultPda,
             userPosition: u.positionPda,
           })
-          .signers([u.intermediateWallet])
+          .signers([owner])
           .rpc({ commitment: "confirmed" });
       },
       provider, zodiacProgram.programId,
@@ -1846,46 +1748,46 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       console.log(`  ${u.name} SOL deposited to mixer`);
     });
 
-    it("Relayer withdraws SPL to User1 intermediate wallet", async () => {
+    it("Relayer withdraws SPL to authority wallet", async () => {
       const u = users[0];
-      logSeparator(`MIXER: Relayer withdraws SPL to ${u.name} intermediate wallet`);
-      const intermediateAta = getAssociatedTokenAddressSync(baseMint, u.intermediateWallet.publicKey);
+      logSeparator(`MIXER: Relayer withdraws SPL to authority (for ${u.name})`);
+      const authorityAta = getAssociatedTokenAddressSync(baseMint, owner.publicKey);
 
-      const balBefore = await withRetry(() => getAccount(provider.connection, intermediateAta));
+      const balBefore = await withRetry(() => getAccount(provider.connection, authorityAta));
       const { withdrawnAmount } = await mixerWithdrawSpl(
-        u.splDepositOutputs!, u.intermediateWallet.publicKey, intermediateAta,
+        u.splDepositOutputs!, owner.publicKey, authorityAta,
         splSyncTree, splAltAddress, relayer, baseMint,
       );
-      const balAfter = await withRetry(() => getAccount(provider.connection, intermediateAta));
+      const balAfter = await withRetry(() => getAccount(provider.connection, authorityAta));
       expect(Number(balAfter.amount) - Number(balBefore.amount)).to.equal(withdrawnAmount);
-      console.log(`  ${u.name} intermediate wallet received ${withdrawnAmount} SPL`);
+      console.log(`  Authority received ${withdrawnAmount} SPL (for ${u.name})`);
     });
 
-    it("Relayer withdraws SOL to User1 intermediate wallet", async () => {
+    it("Relayer withdraws SOL to authority wallet", async () => {
       const u = users[0];
-      logSeparator(`MIXER: Relayer withdraws SOL to ${u.name} intermediate wallet`);
+      logSeparator(`MIXER: Relayer withdraws SOL to authority (for ${u.name})`);
 
-      const balBefore = await provider.connection.getBalance(u.intermediateWallet.publicKey);
+      const balBefore = await provider.connection.getBalance(owner.publicKey);
       const { withdrawnAmount } = await mixerWithdrawSol(
-        u.solDepositOutputs!, u.intermediateWallet.publicKey, solSyncTree, solAltAddress, relayer,
+        u.solDepositOutputs!, owner.publicKey, solSyncTree, solAltAddress, relayer,
       );
-      const balAfter = await provider.connection.getBalance(u.intermediateWallet.publicKey);
+      const balAfter = await provider.connection.getBalance(owner.publicKey);
       expect(balAfter - balBefore).to.equal(withdrawnAmount);
-      console.log(`  ${u.name} intermediate wallet received ${withdrawnAmount} SOL`);
+      console.log(`  Authority received ${withdrawnAmount} SOL (for ${u.name})`);
 
       // Wrap received SOL to WSOL for Zodiac deposit
-      const intermediateWsolAta = await getOrCreateAssociatedTokenAccount(
-        provider.connection, owner, NATIVE_MINT, u.intermediateWallet.publicKey
+      const authorityWsolAta = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, NATIVE_MINT, owner.publicKey
       );
       const wrapTx = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: u.intermediateWallet.publicKey,
-          toPubkey: intermediateWsolAta.address,
+          fromPubkey: owner.publicKey,
+          toPubkey: authorityWsolAta.address,
           lamports: u.quoteDepositAmount,
         }),
-        createSyncNativeInstruction(intermediateWsolAta.address),
+        createSyncNativeInstruction(authorityWsolAta.address),
       );
-      await sendWithEphemeralPayer(provider, wrapTx, [u.intermediateWallet]);
+      await provider.sendAndConfirm(wrapTx, [owner]);
       console.log(`  Wrapped ${u.quoteDepositAmount} SOL -> WSOL`);
     });
 
@@ -1893,7 +1795,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       await createUserPosition(users[0]);
     });
 
-    it("User1 intermediate wallet deposits to zodiac", async () => {
+    it("User1 deposits to zodiac via authority", async () => {
       await depositUserMPC(users[0]);
     });
 
@@ -1953,46 +1855,46 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       console.log(`  ${u.name} SOL deposited to mixer`);
     });
 
-    it("Relayer withdraws SPL to User2 intermediate wallet", async () => {
+    it("Relayer withdraws SPL to authority wallet", async () => {
       const u = users[1];
-      logSeparator(`MIXER: Relayer withdraws SPL to ${u.name} intermediate wallet`);
-      const intermediateAta = getAssociatedTokenAddressSync(baseMint, u.intermediateWallet.publicKey);
+      logSeparator(`MIXER: Relayer withdraws SPL to authority (for ${u.name})`);
+      const authorityAta = getAssociatedTokenAddressSync(baseMint, owner.publicKey);
 
-      const balBefore = await withRetry(() => getAccount(provider.connection, intermediateAta));
+      const balBefore = await withRetry(() => getAccount(provider.connection, authorityAta));
       const { withdrawnAmount } = await mixerWithdrawSpl(
-        u.splDepositOutputs!, u.intermediateWallet.publicKey, intermediateAta,
+        u.splDepositOutputs!, owner.publicKey, authorityAta,
         splSyncTree, splAltAddress, relayer, baseMint,
       );
-      const balAfter = await withRetry(() => getAccount(provider.connection, intermediateAta));
+      const balAfter = await withRetry(() => getAccount(provider.connection, authorityAta));
       expect(Number(balAfter.amount) - Number(balBefore.amount)).to.equal(withdrawnAmount);
-      console.log(`  ${u.name} intermediate wallet received ${withdrawnAmount} SPL`);
+      console.log(`  Authority received ${withdrawnAmount} SPL (for ${u.name})`);
     });
 
-    it("Relayer withdraws SOL to User2 intermediate wallet", async () => {
+    it("Relayer withdraws SOL to authority wallet", async () => {
       const u = users[1];
-      logSeparator(`MIXER: Relayer withdraws SOL to ${u.name} intermediate wallet`);
+      logSeparator(`MIXER: Relayer withdraws SOL to authority (for ${u.name})`);
 
-      const balBefore = await provider.connection.getBalance(u.intermediateWallet.publicKey);
+      const balBefore = await provider.connection.getBalance(owner.publicKey);
       const { withdrawnAmount } = await mixerWithdrawSol(
-        u.solDepositOutputs!, u.intermediateWallet.publicKey, solSyncTree, solAltAddress, relayer,
+        u.solDepositOutputs!, owner.publicKey, solSyncTree, solAltAddress, relayer,
       );
-      const balAfter = await provider.connection.getBalance(u.intermediateWallet.publicKey);
+      const balAfter = await provider.connection.getBalance(owner.publicKey);
       expect(balAfter - balBefore).to.equal(withdrawnAmount);
-      console.log(`  ${u.name} intermediate wallet received ${withdrawnAmount} SOL`);
+      console.log(`  Authority received ${withdrawnAmount} SOL (for ${u.name})`);
 
       // Wrap SOL -> WSOL
-      const intermediateWsolAta = await getOrCreateAssociatedTokenAccount(
-        provider.connection, owner, NATIVE_MINT, u.intermediateWallet.publicKey
+      const authorityWsolAta = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, NATIVE_MINT, owner.publicKey
       );
       const wrapTx = new Transaction().add(
         SystemProgram.transfer({
-          fromPubkey: u.intermediateWallet.publicKey,
-          toPubkey: intermediateWsolAta.address,
+          fromPubkey: owner.publicKey,
+          toPubkey: authorityWsolAta.address,
           lamports: u.quoteDepositAmount,
         }),
-        createSyncNativeInstruction(intermediateWsolAta.address),
+        createSyncNativeInstruction(authorityWsolAta.address),
       );
-      await sendWithEphemeralPayer(provider, wrapTx, [u.intermediateWallet]);
+      await provider.sendAndConfirm(wrapTx, [owner]);
       console.log(`  Wrapped ${u.quoteDepositAmount} SOL -> WSOL`);
     });
 
@@ -2000,7 +1902,7 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       await createUserPosition(users[1]);
     });
 
-    it("User2 intermediate wallet deposits to zodiac", async () => {
+    it("User2 deposits to zodiac via authority", async () => {
       await depositUserMPC(users[1]);
     });
 
@@ -2067,38 +1969,34 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       logSeparator("METEORA: Partial Withdraw (User2)");
       await new Promise(r => setTimeout(r, 3000));
 
-      const wdEph = await setupEphemeralWallet(zodiacProgram, provider, owner, vaultPda, 100_000_000);
-      try {
-        const wdTx = await zodiacProgram.methods
-          .withdrawFromMeteoraDammV2(RELAY_INDEX, user2LiquidityShare, new anchor.BN(0), new anchor.BN(0))
-          .accounts({
-            payer: wdEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: wdEph.ephemeralPda, relayPda,
-            poolAuthority: POOL_AUTHORITY, pool: poolPda, position: positionPda,
-            relayTokenA, relayTokenB, tokenAVault, tokenBVault,
-            tokenAMint: tokenA, tokenBMint: tokenB, positionNftAccount: posNftAccount,
-            tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
-            eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
-          })
-          .transaction();
-        await sendWithEphemeralPayer(provider, wdTx, [wdEph.ephemeralKp]);
-        console.log("  Partial withdrawal succeeded");
-      } finally {
-        await teardownEphemeralWallet(zodiacProgram, provider, owner, vaultPda, wdEph.ephemeralKp, wdEph.ephemeralPda);
-      }
+      await zodiacProgram.methods
+        .withdrawFromMeteoraDammV2(RELAY_INDEX, user2LiquidityShare, new anchor.BN(0), new anchor.BN(0))
+        .accounts({
+          payer: owner.publicKey, vault: vaultPda, relayPda,
+          poolAuthority: POOL_AUTHORITY, pool: poolPda, position: positionPda,
+          relayTokenA, relayTokenB, tokenAVault, tokenBVault,
+          tokenAMint: tokenA, tokenBMint: tokenB, positionNftAccount: posNftAccount,
+          tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
+          eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
+      console.log("  Partial withdrawal succeeded");
     });
 
-    it("transfers tokens from relay to User2 intermediate wallet", async () => {
+    it("transfers tokens from relay to User2 destination", async () => {
       logSeparator("RELAY TRANSFER: User2 withdrawal");
       await new Promise(r => setTimeout(r, 2000));
 
       const splMintForRelay = isTokenANative ? tokenB : tokenA;
+      const destOwner = Keypair.generate();
       const destTokenKp = Keypair.generate();
       const destWsolKp = Keypair.generate();
       const destinationTokenAccount = await createAccount(
-        provider.connection, owner, splMintForRelay, users[1].intermediateWallet.publicKey, destTokenKp,
+        provider.connection, owner, splMintForRelay, destOwner.publicKey, destTokenKp,
       );
       const destinationWsolAccount = await createAccount(
-        provider.connection, owner, NATIVE_MINT, users[1].intermediateWallet.publicKey, destWsolKp,
+        provider.connection, owner, NATIVE_MINT, destOwner.publicKey, destWsolKp,
       );
 
       const relSplBal = await withRetry(() => getAccount(provider.connection, relaySplAccount));
@@ -2164,42 +2062,38 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
       const unlockedLiquidity = new anchor.BN(positionInfo!.data.slice(152, 168), "le");
       expect(unlockedLiquidity.gt(new anchor.BN(0))).to.be.true;
 
-      const wdEph = await setupEphemeralWallet(zodiacProgram, provider, owner, vaultPda, 100_000_000);
-      try {
-        const wdTx = await zodiacProgram.methods
-          .withdrawFromMeteoraDammV2(RELAY_INDEX, unlockedLiquidity, new anchor.BN(0), new anchor.BN(0))
-          .accounts({
-            payer: wdEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: wdEph.ephemeralPda, relayPda,
-            poolAuthority: POOL_AUTHORITY, pool: poolPda, position: positionPda,
-            relayTokenA, relayTokenB, tokenAVault, tokenBVault,
-            tokenAMint: tokenA, tokenBMint: tokenB, positionNftAccount: posNftAccount,
-            tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
-            eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
-          })
-          .transaction();
-        await sendWithEphemeralPayer(provider, wdTx, [wdEph.ephemeralKp]);
+      await zodiacProgram.methods
+        .withdrawFromMeteoraDammV2(RELAY_INDEX, unlockedLiquidity, new anchor.BN(0), new anchor.BN(0))
+        .accounts({
+          payer: owner.publicKey, vault: vaultPda, relayPda,
+          poolAuthority: POOL_AUTHORITY, pool: poolPda, position: positionPda,
+          relayTokenA, relayTokenB, tokenAVault, tokenBVault,
+          tokenAMint: tokenA, tokenBMint: tokenB, positionNftAccount: posNftAccount,
+          tokenAProgram: TOKEN_PROGRAM_ID, tokenBProgram: TOKEN_PROGRAM_ID,
+          eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
+        })
+        .signers([owner])
+        .rpc({ commitment: "confirmed" });
 
-        const posAfter = await provider.connection.getAccountInfo(positionPda);
-        const afterLiq = new anchor.BN(posAfter!.data.slice(152, 168), "le");
-        expect(afterLiq.eq(new anchor.BN(0))).to.be.true;
-        console.log("  All remaining liquidity withdrawn");
-      } finally {
-        await teardownEphemeralWallet(zodiacProgram, provider, owner, vaultPda, wdEph.ephemeralKp, wdEph.ephemeralPda);
-      }
+      const posAfter = await provider.connection.getAccountInfo(positionPda);
+      const afterLiq = new anchor.BN(posAfter!.data.slice(152, 168), "le");
+      expect(afterLiq.eq(new anchor.BN(0))).to.be.true;
+      console.log("  All remaining liquidity withdrawn");
     });
 
-    it("transfers tokens from relay to User1 intermediate wallet", async () => {
+    it("transfers tokens from relay to User1 destination", async () => {
       logSeparator("RELAY TRANSFER: User1 withdrawal");
       await new Promise(r => setTimeout(r, 2000));
 
       const splMintForRelay = isTokenANative ? tokenB : tokenA;
+      const destOwner = Keypair.generate();
       const destTokenKp = Keypair.generate();
       const destWsolKp = Keypair.generate();
       const destinationTokenAccount = await createAccount(
-        provider.connection, owner, splMintForRelay, users[0].intermediateWallet.publicKey, destTokenKp,
+        provider.connection, owner, splMintForRelay, destOwner.publicKey, destTokenKp,
       );
       const destinationWsolAccount = await createAccount(
-        provider.connection, owner, NATIVE_MINT, users[0].intermediateWallet.publicKey, destWsolKp,
+        provider.connection, owner, NATIVE_MINT, destOwner.publicKey, destWsolKp,
       );
 
       const relSplBal = await withRetry(() => getAccount(provider.connection, relaySplAccount));
@@ -2325,14 +2219,14 @@ describe("Full Privacy Integration: Mixer -> Zodiac -> Meteora", () => {
     logSeparator("FULL PRIVACY FLOW SUMMARY");
     console.log("");
     console.log("  DEPOSIT FLOW PER USER:");
-    console.log("    realWallet --SPL--> Mixer --SPL--> intermediateWallet --SPL+WSOL--> Zodiac Vault");
-    console.log("    realWallet --SOL--> Mixer --SOL--> intermediateWallet --------^");
+    console.log("    realWallet --SPL--> Mixer --SPL--> authority --SPL+WSOL--> Zodiac Vault");
+    console.log("    realWallet --SOL--> Mixer --SOL--> authority --------^");
     console.log("");
     console.log("  PRIVACY LAYERS:");
-    console.log("    1. ZK Mixer: Breaks realWallet -> intermediateWallet link");
+    console.log("    1. ZK Mixer: Breaks realWallet -> authority link");
     console.log("    2. Arcium MPC: Individual deposit amounts never visible on-chain");
     console.log("    3. Relay PDA: Single aggregate position in Meteora");
-    console.log("    4. Ephemeral wallets: Fresh keypair per operation");
+    console.log("    4. Authority-first: Authority signs all vault operations, users identified by user_id_hash");
     console.log("");
     for (const u of users) {
       console.log(`  ${u.name}: deposited ${u.baseDepositAmount} base + ${u.quoteDepositAmount} quote`);

@@ -996,17 +996,15 @@ describe("zodiac-liquidity-fail", () => {
         };
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
-        // --- Ephemeral wallet for pool creation ---
-        const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
-        const poolCreateTx = await program.methods
+        // Authority signs pool creation directly (no ephemeral wallet)
+        await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            payer: poolEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: poolEph.ephemeralPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tokenA, tokenBMint: tokenB,
@@ -1016,17 +1014,14 @@ describe("zodiac-liquidity-fail", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        await sendWithEphemeralPayer(provider, poolCreateTx, [poolEph.ephemeralKp, poolNftMint]);
+          .signers([owner, poolNftMint])
+          .rpc({ commitment: "confirmed" });
 
         console.log("Pool created for fail tests at:", poolPda.toString());
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
 
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // --- Ephemeral wallet for position creation ---
-        const posEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
+        // Authority signs position creation directly (no ephemeral wallet)
         posNftMint = Keypair.generate();
         [positionPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
@@ -1042,10 +1037,10 @@ describe("zodiac-liquidity-fail", () => {
           program.programId
         );
 
-        const posCreateTx = await program.methods
+        await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            payer: posEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: posEph.ephemeralPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
             pool: poolPda, position: positionPda,
@@ -1053,11 +1048,10 @@ describe("zodiac-liquidity-fail", () => {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        await sendWithEphemeralPayer(provider, posCreateTx, [posEph.ephemeralKp, posNftMint]);
+          .signers([owner, posNftMint])
+          .rpc({ commitment: "confirmed" });
 
         console.log("Position created for fail tests");
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
       } catch (err: any) {
         console.log("Meteora CPI fail test setup failed:", err.message?.substring(0, 150));
         setupFailed = true;
@@ -1075,21 +1069,19 @@ describe("zodiac-liquidity-fail", () => {
       }
     });
 
-    it("fails create_customizable_pool with unregistered ephemeral wallet", async function () {
+    it("fails create_customizable_pool with non-authority signer", async function () {
       if (setupFailed) { this.skip(); return; }
-      const unregisteredWallet = Keypair.generate();
-      // Fund unregistered wallet with 0.05 SOL
+      const nonAuthority = Keypair.generate();
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: unregisteredWallet.publicKey,
+          toPubkey: nonAuthority.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       const positionNftMint = Keypair.generate();
-      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       const poolFees = {
         baseFee: {
@@ -1116,9 +1108,8 @@ describe("zodiac-liquidity-fail", () => {
             0, 0, null,
           )
           .accounts({
-            payer: unregisteredWallet.publicKey,
+            payer: nonAuthority.publicKey,
             vault: vaultPda,
-            ephemeralWallet: unregisteredEphemeralPda,
             relayPda: deriveRelayPda(vaultPda, relayIndex, program.programId),
             positionNftMint: positionNftMint.publicKey,
             positionNftAccount: PublicKey.default,
@@ -1138,35 +1129,32 @@ describe("zodiac-liquidity-fail", () => {
             eventAuthority: PublicKey.default,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([unregisteredWallet, positionNftMint])
+          .signers([nonAuthority, positionNftMint])
           .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with unregistered ephemeral wallet");
+        throw new Error("Should have failed with non-authority signer");
       } catch (err: any) {
-        console.log("Expected error for unregistered ephemeral wallet:", err.message?.substring(0, 100));
+        console.log("Expected error for non-authority signer (create pool):", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
-        // PDA not found = AccountNotInitialized or similar
         expect(msg).to.satisfy((m: string) =>
-          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
         );
       }
     });
 
-    it("fails deposit_to_meteora with unregistered ephemeral wallet", async function () {
+    it("fails deposit_to_meteora with non-authority signer", async function () {
       if (setupFailed) { this.skip(); return; }
-      const unregisteredWallet = Keypair.generate();
+      const nonAuthority = Keypair.generate();
 
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: unregisteredWallet.publicKey,
+          toPubkey: nonAuthority.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       try {
         await program.methods
@@ -1178,9 +1166,8 @@ describe("zodiac-liquidity-fail", () => {
             null,
           )
           .accounts({
-            payer: unregisteredWallet.publicKey,
+            payer: nonAuthority.publicKey,
             vault: vaultPda,
-            ephemeralWallet: unregisteredEphemeralPda,
             relayPda,
             pool: poolPda,
             position: positionPda,
@@ -1197,34 +1184,32 @@ describe("zodiac-liquidity-fail", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([unregisteredWallet])
+          .signers([nonAuthority])
           .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with unregistered ephemeral wallet");
+        throw new Error("Should have failed with non-authority signer");
       } catch (err: any) {
-        console.log("Expected error for unregistered ephemeral wallet (deposit):", err.message?.substring(0, 100));
+        console.log("Expected error for non-authority signer (deposit):", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
         expect(msg).to.satisfy((m: string) =>
-          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
         );
       }
     });
 
-    it("fails withdraw_from_meteora with unregistered ephemeral wallet", async function () {
+    it("fails withdraw_from_meteora with non-authority signer", async function () {
       if (setupFailed) { this.skip(); return; }
-      const unregisteredWallet = Keypair.generate();
+      const nonAuthority = Keypair.generate();
 
       const fundTx = new anchor.web3.Transaction().add(
         SystemProgram.transfer({
           fromPubkey: owner.publicKey,
-          toPubkey: unregisteredWallet.publicKey,
+          toPubkey: nonAuthority.publicKey,
           lamports: 50_000_000,
         })
       );
       await provider.sendAndConfirm(fundTx, [owner]);
 
       await new Promise(resolve => setTimeout(resolve, 2000));
-
-      const unregisteredEphemeralPda = deriveEphemeralWalletPda(vaultPda, unregisteredWallet.publicKey, program.programId);
 
       try {
         await program.methods
@@ -1235,9 +1220,8 @@ describe("zodiac-liquidity-fail", () => {
             new anchor.BN(0),
           )
           .accounts({
-            payer: unregisteredWallet.publicKey,
+            payer: nonAuthority.publicKey,
             vault: vaultPda,
-            ephemeralWallet: unregisteredEphemeralPda,
             relayPda,
             poolAuthority: POOL_AUTHORITY,
             pool: poolPda,
@@ -1254,14 +1238,238 @@ describe("zodiac-liquidity-fail", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .signers([unregisteredWallet])
+          .signers([nonAuthority])
           .rpc({ commitment: "confirmed" });
-        throw new Error("Should have failed with unregistered ephemeral wallet");
+        throw new Error("Should have failed with non-authority signer");
       } catch (err: any) {
-        console.log("Expected error for unregistered ephemeral wallet (withdraw):", err.message?.substring(0, 100));
+        console.log("Expected error for non-authority signer (withdraw):", err.message?.substring(0, 100));
         const msg = err.message || err.toString();
         expect(msg).to.satisfy((m: string) =>
-          m.includes("AccountNotInitialized") || m.includes("not found") || m.includes("Constraint") || m.includes("Error")
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("Error")
+        );
+      }
+    });
+  });
+
+  // ============================================================
+  // AUTHORITY-FIRST FLOW - FAILURE CASES
+  // ============================================================
+  describe("Authority-First Flow - Failure Cases", () => {
+    const testUserId = "fail-test-user-1";
+    let userIdHash: Buffer;
+
+    before(() => {
+      userIdHash = createHash("sha256").update(testUserId).digest();
+    });
+
+    it("fails create_user_position_by_authority with non-authority signer", async () => {
+      const nonAuthority = Keypair.generate();
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: nonAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      const [positionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
+        program.programId
+      );
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const posNonce = randomBytes(16);
+      const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+      try {
+        await program.methods
+          .createUserPositionByAuthority(
+            Array.from(userIdHash) as number[],
+            computationOffset,
+            new anchor.BN(deserializeLE(posNonce).toString())
+          )
+          .accountsPartial({
+            authority: nonAuthority.publicKey,
+            vault: vaultPda,
+            userPosition: positionPda,
+            signPdaAccount,
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
+            clusterAccount: getClusterAccount(),
+            mxeAccount: getMXEAccAddress(program.programId),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+            compDefAccount: getCompDefAccAddress(
+              program.programId,
+              Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()
+            ),
+            poolAccount: getFeePoolAccAddress(),
+            clockAccount: getClockAccAddress(),
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([nonAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with non-authority signer");
+      } catch (err: any) {
+        console.log("Expected error for non-authority (create_user_position_by_authority):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("has_one") || m.includes("Error")
+        );
+      }
+    });
+
+    it("fails deposit_by_authority with non-authority signer", async () => {
+      const nonAuthority = Keypair.generate();
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: nonAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      const [positionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
+        program.programId
+      );
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const nonce = randomBytes(16);
+      const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+      // Create minimal token accounts for non-authority
+      const nonAuthTokenAta = await getOrCreateAssociatedTokenAccount(
+        provider.connection, nonAuthority, tokenMint, nonAuthority.publicKey
+      );
+      const nonAuthQuoteAta = await getOrCreateAssociatedTokenAccount(
+        provider.connection, nonAuthority, NATIVE_MINT, nonAuthority.publicKey
+      );
+      const vaultTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, tokenMint, vaultPda, true
+      );
+      const vaultQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, NATIVE_MINT, vaultPda, true
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      try {
+        await program.methods
+          .depositByAuthority(
+            Array.from(userIdHash) as number[],
+            computationOffset,
+            Array.from(new Uint8Array(32)) as number[],
+            Array.from(new Uint8Array(32)) as number[],
+            Array.from(new Uint8Array(32)) as number[],
+            new anchor.BN(deserializeLE(nonce).toString()),
+            new anchor.BN(1000),
+            new anchor.BN(1000)
+          )
+          .accountsPartial({
+            authority: nonAuthority.publicKey,
+            vault: vaultPda,
+            userPosition: positionPda,
+            tokenMint: tokenMint,
+            quoteMint: quoteMint,
+            authorityTokenAccount: nonAuthTokenAta.address,
+            vaultTokenAccount: vaultTokenAccount.address,
+            authorityQuoteTokenAccount: nonAuthQuoteAta.address,
+            vaultQuoteTokenAccount: vaultQuoteTokenAccount.address,
+            signPdaAccount,
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
+            clusterAccount: getClusterAccount(),
+            mxeAccount: getMXEAccAddress(program.programId),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+            compDefAccount: getCompDefAccAddress(
+              program.programId,
+              Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()
+            ),
+            poolAccount: getFeePoolAccAddress(),
+            clockAccount: getClockAccAddress(),
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .signers([nonAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with non-authority signer");
+      } catch (err: any) {
+        console.log("Expected error for non-authority (deposit_by_authority):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("has_one") || m.includes("Error")
+        );
+      }
+    });
+
+    it("fails compute_withdrawal_by_authority with non-authority signer", async () => {
+      const nonAuthority = Keypair.generate();
+      const fundTx = new anchor.web3.Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: nonAuthority.publicKey,
+          lamports: 50_000_000,
+        })
+      );
+      await provider.sendAndConfirm(fundTx, [owner]);
+
+      const [positionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
+        program.programId
+      );
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const sharedNonce = randomBytes(16);
+      const computationOffset = new anchor.BN(randomBytes(8), "hex");
+
+      try {
+        await program.methods
+          .computeWithdrawalByAuthority(
+            Array.from(userIdHash) as number[],
+            computationOffset,
+            Array.from(new Uint8Array(32)) as number[],
+            new anchor.BN(deserializeLE(sharedNonce).toString())
+          )
+          .accountsPartial({
+            authority: nonAuthority.publicKey,
+            signPdaAccount,
+            mxeAccount: getMXEAccAddress(program.programId),
+            mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+            executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+            computationAccount: getComputationAccAddress(actualClusterOffset, computationOffset),
+            compDefAccount: getCompDefAccAddress(
+              program.programId,
+              Buffer.from(getCompDefAccOffset("compute_withdrawal")).readUInt32LE()
+            ),
+            clusterAccount: getClusterAccount(),
+            poolAccount: getFeePoolAccAddress(),
+            clockAccount: getClockAccAddress(),
+            systemProgram: SystemProgram.programId,
+            vault: vaultPda,
+            userPosition: positionPda,
+          })
+          .signers([nonAuthority])
+          .rpc({ commitment: "confirmed" });
+        throw new Error("Should have failed with non-authority signer");
+      } catch (err: any) {
+        console.log("Expected error for non-authority (compute_withdrawal_by_authority):", err.message?.substring(0, 100));
+        const msg = err.message || err.toString();
+        expect(msg).to.satisfy((m: string) =>
+          m.includes("Unauthorized") || m.includes("Constraint") || m.includes("has_one") || m.includes("Error")
         );
       }
     });

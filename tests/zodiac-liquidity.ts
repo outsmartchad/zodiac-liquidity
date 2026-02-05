@@ -1551,11 +1551,6 @@ describe("zodiac-liquidity", () => {
     it("creates a customizable pool via relay PDA", async function () {
       if (setupFailed) { this.skip(); return; }
 
-      // --- Ephemeral wallet lifecycle: register + fund ---
-      const { ephemeralKp, ephemeralPda } = await setupEphemeralWallet(
-        program, provider, owner, vaultPda
-      );
-
       const positionNftMint = Keypair.generate();
 
       // Derive pool PDA using "cpool" seed (DAMM v2 CUSTOMIZABLE_POOL_PREFIX)
@@ -1613,8 +1608,8 @@ describe("zodiac-liquidity", () => {
       const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9); // 1:1 price
 
       try {
-        // Ephemeral wallet signs the CPI (not authority)
-        const poolTx = await program.methods
+        // Authority signs directly (no ephemeral wallet needed)
+        const sig = await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex,
             poolFees,
@@ -1628,9 +1623,8 @@ describe("zodiac-liquidity", () => {
             null,                              // activation_point (None = immediate)
           )
           .accounts({
-            payer: ephemeralKp.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
-            ephemeralWallet: ephemeralPda,
             relayPda: relayPda,
             positionNftMint: positionNftMint.publicKey,
             positionNftAccount: positionNftAccount,
@@ -1650,11 +1644,10 @@ describe("zodiac-liquidity", () => {
             eventAuthority: eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
+          .signers([owner, positionNftMint])
+          .rpc({ commitment: "confirmed" });
 
-        const sig = await sendWithEphemeralPayer(provider, poolTx, [ephemeralKp, positionNftMint]);
-
-        console.log("[SIGNER] createCustomizablePoolViaRelay => ephemeralKp:", ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createCustomizablePoolViaRelay => owner:", owner.publicKey.toString());
         console.log("[SIGNER] createCustomizablePoolViaRelay => positionNftMint:", positionNftMint.publicKey.toString());
         console.log("Create customizable pool tx:", sig);
 
@@ -1671,9 +1664,6 @@ describe("zodiac-liquidity", () => {
           return;
         }
         throw err;
-      } finally {
-        // --- Ephemeral wallet lifecycle: return funds + close PDA ---
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, ephemeralKp, ephemeralPda);
       }
     });
 
@@ -1768,18 +1758,15 @@ describe("zodiac-liquidity", () => {
       const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
       try {
-        // --- Ephemeral wallet for pool creation ---
-        const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
-        // Create pool first (ephemeral wallet signs, no provider wallet)
-        const poolCreateTx = await program.methods
+        // Authority signs pool creation directly (no ephemeral wallet)
+        await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            payer: poolEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: poolEph.ephemeralPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tA, tokenBMint: tB,
@@ -1789,23 +1776,16 @@ describe("zodiac-liquidity", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        await sendWithEphemeralPayer(provider, poolCreateTx, [poolEph.ephemeralKp, poolNftMint]);
+          .signers([owner, poolNftMint])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] createCustomizablePoolViaRelay (position test setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createCustomizablePoolViaRelay (position test setup) => owner:", owner.publicKey.toString());
         console.log("Pool created for position test");
 
-        // Close pool creation ephemeral wallet
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
+        // Wait for fresh blockhash after pool creation
+        await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Wait for fresh blockhash after pool creation (previous setup exhausts blockhash lifetime)
-        // Localnet can also hit stale blockhash after heavy MPC activity
-        await new Promise(resolve => setTimeout(resolve, 10000));
-
-        // --- Ephemeral wallet for position creation ---
-        const posEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
-        // Now create a new position on that pool
+        // Now create a new position on that pool (authority signs directly)
         const posNftMint = Keypair.generate();
         const [positionPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
@@ -1822,12 +1802,11 @@ describe("zodiac-liquidity", () => {
           program.programId
         );
 
-        const posTx = await program.methods
+        const sig = await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            payer: posEph.ephemeralKp.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
-            ephemeralWallet: posEph.ephemeralPda,
             relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey,
@@ -1840,10 +1819,10 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        const sig = await sendWithEphemeralPayer(provider, posTx, [posEph.ephemeralKp, posNftMint]);
+          .signers([owner, posNftMint])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] createMeteoraPosition => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createMeteoraPosition => owner:", owner.publicKey.toString());
         console.log("[SIGNER] createMeteoraPosition => posNftMint:", posNftMint.publicKey.toString());
         console.log("Create Meteora position tx:", sig);
 
@@ -1854,9 +1833,6 @@ describe("zodiac-liquidity", () => {
         expect(tracker.pool.toString()).to.equal(poolPda.toString());
         expect(tracker.positionNftMint.toString()).to.equal(posNftMint.publicKey.toString());
         console.log("Position tracker verified");
-
-        // Close position creation ephemeral wallet
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
       } catch (err: any) {
         // Skip gracefully if DAMM v2 not deployed or pool CPI fails (seed mismatch, etc.)
         const msg = err.message || err.toString();
@@ -1943,10 +1919,7 @@ describe("zodiac-liquidity", () => {
         await provider.sendAndConfirm(fundWsolTx, [relayer]);
         console.log("[SIGNER] fundRelayWSOL (dep/wd setup, SOL transfer) => relayer:", relayer.publicKey.toString());
 
-        // --- Ephemeral wallet for pool creation ---
-        const poolEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
-        // Create a customizable pool
+        // Create a customizable pool (authority signs directly)
         const poolNftMint = Keypair.generate();
         [poolPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("cpool"), maxKey(tokenA, tokenB).toBuffer(), minKey(tokenA, tokenB).toBuffer()],
@@ -1979,14 +1952,14 @@ describe("zodiac-liquidity", () => {
         };
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
 
-        const depWdPoolTx = await program.methods
+        await program.methods
           .createCustomizablePoolViaRelay(
             relayIndex, poolFees,
             new anchor.BN(MIN_SQRT_PRICE), new anchor.BN(MAX_SQRT_PRICE),
             false, new anchor.BN(1_000_000), sqrtPrice, 0, 0, null,
           )
           .accounts({
-            payer: poolEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: poolEph.ephemeralPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, relayPda,
             positionNftMint: poolNftMint.publicKey, positionNftAccount: poolNftAccount,
             poolAuthority: POOL_AUTHORITY, pool: poolPda, position: poolPosition,
             tokenAMint: tokenA, tokenBMint: tokenB,
@@ -1996,19 +1969,15 @@ describe("zodiac-liquidity", () => {
             token2022Program: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        await sendWithEphemeralPayer(provider, depWdPoolTx, [poolEph.ephemeralKp, poolNftMint]);
+          .signers([owner, poolNftMint])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] createCustomizablePoolViaRelay (dep/wd setup) => ephemeralKp:", poolEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createCustomizablePoolViaRelay (dep/wd setup) => owner:", owner.publicKey.toString());
         console.log("Pool created for deposit/withdraw test at:", poolPda.toString());
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, poolEph.ephemeralKp, poolEph.ephemeralPda);
 
         await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // --- Ephemeral wallet for position creation ---
-        const posEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
-        // Create a separate position for deposit/withdraw testing
+        // Create a separate position for deposit/withdraw testing (authority signs directly)
         posNftMint = Keypair.generate();
         [positionPda] = PublicKey.findProgramAddressSync(
           [Buffer.from("position"), posNftMint.publicKey.toBuffer()],
@@ -2024,10 +1993,10 @@ describe("zodiac-liquidity", () => {
           program.programId
         );
 
-        const depWdPosTx = await program.methods
+        await program.methods
           .createMeteoraPosition(relayIndex)
           .accounts({
-            payer: posEph.ephemeralKp.publicKey, vault: vaultPda, ephemeralWallet: posEph.ephemeralPda, relayPda,
+            payer: owner.publicKey, vault: vaultPda, relayPda,
             relayPositionTracker,
             positionNftMint: posNftMint.publicKey, positionNftAccount: posNftAccount,
             pool: poolPda, position: positionPda,
@@ -2035,12 +2004,11 @@ describe("zodiac-liquidity", () => {
             tokenProgram: TOKEN_2022_PROGRAM_ID,
             systemProgram: SystemProgram.programId, eventAuthority, ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        await sendWithEphemeralPayer(provider, depWdPosTx, [posEph.ephemeralKp, posNftMint]);
+          .signers([owner, posNftMint])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] createMeteoraPosition (dep/wd setup) => ephemeralKp:", posEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] createMeteoraPosition (dep/wd setup) => owner:", owner.publicKey.toString());
         console.log("Position created for deposit/withdraw test");
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, posEph.ephemeralKp, posEph.ephemeralPda);
       } catch (err: any) {
         console.log("Deposit/withdraw test setup failed:", err.message?.substring(0, 150));
         setupFailed = true;
@@ -2063,9 +2031,6 @@ describe("zodiac-liquidity", () => {
 
       await new Promise(resolve => setTimeout(resolve, 3000));
 
-      // --- Ephemeral wallet for deposit ---
-      const depEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
-
       try {
         // Calculate proper liquidity delta from token amounts using Meteora SDK
         const sqrtPrice = getSqrtPriceFromPrice(1, 9, 9);
@@ -2077,7 +2042,8 @@ describe("zodiac-liquidity", () => {
         );
         console.log("Calculated liquidity delta for deposit:", liquidityDelta.toString());
 
-        const depTx = await program.methods
+        // Authority signs directly (no ephemeral wallet)
+        const sig = await program.methods
           .depositToMeteoraDammV2(
             relayIndex,
             liquidityDelta,                        // SDK-computed liquidity_delta
@@ -2086,9 +2052,8 @@ describe("zodiac-liquidity", () => {
             null,                                  // sol_amount (not using WSOL)
           )
           .accounts({
-            payer: depEph.ephemeralKp.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
-            ephemeralWallet: depEph.ephemeralPda,
             relayPda,
             pool: poolPda,
             position: positionPda,
@@ -2105,10 +2070,10 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        const sig = await sendWithEphemeralPayer(provider, depTx, [depEph.ephemeralKp]);
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] depositToMeteoraDammV2 => ephemeralKp:", depEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] depositToMeteoraDammV2 => owner:", owner.publicKey.toString());
         console.log("Deposit to Meteora tx:", sig);
 
         // Verify position has liquidity by checking the account exists
@@ -2122,8 +2087,6 @@ describe("zodiac-liquidity", () => {
           return;
         }
         throw err;
-      } finally {
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, depEph.ephemeralKp, depEph.ephemeralPda);
       }
     });
 
@@ -2131,9 +2094,6 @@ describe("zodiac-liquidity", () => {
       if (setupFailed) { this.skip(); return; }
 
       await new Promise(resolve => setTimeout(resolve, 3000));
-
-      // --- Ephemeral wallet for withdraw ---
-      const wdEph = await setupEphemeralWallet(program, provider, owner, vaultPda);
 
       try {
         // Read the position's actual unlocked_liquidity (u128 at offset 152 in account data)
@@ -2144,8 +2104,8 @@ describe("zodiac-liquidity", () => {
         const unlockedLiquidity = new anchor.BN(unlockedLiquidityBytes, "le");
         console.log("Position unlocked_liquidity:", unlockedLiquidity.toString());
 
-        // Withdraw all unlocked liquidity (ephemeral wallet signs, no provider wallet)
-        const wdTx = await program.methods
+        // Authority signs directly (no ephemeral wallet)
+        const sig = await program.methods
           .withdrawFromMeteoraDammV2(
             relayIndex,
             unlockedLiquidity,           // liquidity_delta (withdraw all)
@@ -2153,9 +2113,8 @@ describe("zodiac-liquidity", () => {
             new anchor.BN(0),            // token_b_amount_threshold (no minimum)
           )
           .accounts({
-            payer: wdEph.ephemeralKp.publicKey,
+            payer: owner.publicKey,
             vault: vaultPda,
-            ephemeralWallet: wdEph.ephemeralPda,
             relayPda,
             poolAuthority: POOL_AUTHORITY,
             pool: poolPda,
@@ -2172,10 +2131,10 @@ describe("zodiac-liquidity", () => {
             eventAuthority,
             ammProgram: DAMM_V2_PROGRAM_ID,
           })
-          .transaction();
-        const sig = await sendWithEphemeralPayer(provider, wdTx, [wdEph.ephemeralKp]);
+          .signers([owner])
+          .rpc({ commitment: "confirmed" });
 
-        console.log("[SIGNER] withdrawFromMeteoraDammV2 => ephemeralKp:", wdEph.ephemeralKp.publicKey.toString());
+        console.log("[SIGNER] withdrawFromMeteoraDammV2 => owner:", owner.publicKey.toString());
         console.log("Withdraw from Meteora tx:", sig);
       } catch (err: any) {
         const msg = err.message || err.toString();
@@ -2184,8 +2143,6 @@ describe("zodiac-liquidity", () => {
           return;
         }
         throw err;
-      } finally {
-        await teardownEphemeralWallet(program, provider, owner, vaultPda, wdEph.ephemeralKp, wdEph.ephemeralPda);
       }
     });
 
@@ -2258,6 +2215,323 @@ describe("zodiac-liquidity", () => {
       const accountInfo = await provider.connection.getAccountInfo(ephemeralPda);
       expect(accountInfo).to.be.null;
       console.log("Ephemeral wallet closed and verified");
+    });
+  });
+
+  // ============================================================
+  // AUTHORITY-FIRST FLOW TESTS (_by_authority instructions)
+  // ============================================================
+  describe("Authority-First Flow", () => {
+    let byAuthPositionPda: PublicKey;
+    const testUserId = "test-user-authority-1";
+    let userIdHash: Buffer;
+
+    before(() => {
+      userIdHash = createHash("sha256").update(testUserId).digest();
+      [byAuthPositionPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
+        program.programId
+      );
+      console.log("Authority-first test user ID:", testUserId);
+      console.log("User ID hash:", userIdHash.toString("hex"));
+      console.log("By-authority position PDA:", byAuthPositionPda.toString());
+    });
+
+    it("creates user position by authority", async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const posNonce = randomBytes(16);
+      const finalizeSig = await queueWithRetry(
+        "createUserPositionByAuthority",
+        async (computationOffset) => {
+          return program.methods
+            .createUserPositionByAuthority(
+              Array.from(userIdHash) as number[],
+              computationOffset,
+              new anchor.BN(deserializeLE(posNonce).toString())
+            )
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              userPosition: byAuthPositionPda,
+              signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                actualClusterOffset,
+                computationOffset
+              ),
+              clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("init_user_position")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("[SIGNER] createUserPositionByAuthority => owner:", owner.publicKey.toString());
+      console.log("Create position by authority succeeded, finalize tx:", finalizeSig);
+
+      const posAccount = await program.account.userPositionAccount.fetch(byAuthPositionPda);
+      // Owner field stores user_id_hash as Pubkey
+      console.log("Position owner (user_id_hash as pubkey):", posAccount.owner.toString());
+      console.log("Position state[0]:", Buffer.from(posAccount.positionState[0]).toString("hex"));
+    });
+
+    it("deposits by authority", async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const baseDepositAmount = BigInt(25_000_000); // 0.025 base token
+      const quoteDepositAmount = BigInt(25_000_000); // 0.025 SOL
+      const plaintext = [baseDepositAmount, quoteDepositAmount];
+      const nonce = randomBytes(16);
+      const ciphertext = cipher.encrypt(plaintext, nonce);
+
+      // Create/get authority token accounts and mint tokens
+      const authorityTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, tokenMint, owner.publicKey
+      );
+      await mintTo(provider.connection, owner, tokenMint, authorityTokenAccount.address, owner, 100_000_000);
+
+      const vaultTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, tokenMint, vaultPda, true
+      );
+
+      const authorityQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, NATIVE_MINT, owner.publicKey
+      );
+      const wrapTx = new Transaction().add(
+        SystemProgram.transfer({
+          fromPubkey: owner.publicKey,
+          toPubkey: authorityQuoteTokenAccount.address,
+          lamports: 100_000_000,
+        }),
+        createSyncNativeInstruction(authorityQuoteTokenAccount.address)
+      );
+      await provider.sendAndConfirm(wrapTx, [owner]);
+
+      const vaultQuoteTokenAccount = await getOrCreateAssociatedTokenAccount(
+        provider.connection, owner, NATIVE_MINT, vaultPda, true
+      );
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const finalizeSig = await queueWithRetry(
+        "depositByAuthority",
+        async (computationOffset) => {
+          return program.methods
+            .depositByAuthority(
+              Array.from(userIdHash) as number[],
+              computationOffset,
+              Array.from(ciphertext[0]) as number[],
+              Array.from(ciphertext[1]) as number[],
+              Array.from(encryptionKeys.publicKey) as number[],
+              new anchor.BN(deserializeLE(nonce).toString()),
+              new anchor.BN(baseDepositAmount.toString()),
+              new anchor.BN(quoteDepositAmount.toString())
+            )
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              userPosition: byAuthPositionPda,
+              tokenMint: tokenMint,
+              quoteMint: quoteMint,
+              authorityTokenAccount: authorityTokenAccount.address,
+              vaultTokenAccount: vaultTokenAccount.address,
+              authorityQuoteTokenAccount: authorityQuoteTokenAccount.address,
+              vaultQuoteTokenAccount: vaultQuoteTokenAccount.address,
+              signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                actualClusterOffset,
+                computationOffset
+              ),
+              clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("deposit")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              tokenProgram: TOKEN_PROGRAM_ID,
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("[SIGNER] depositByAuthority => owner:", owner.publicKey.toString());
+      console.log("Deposit by authority succeeded, finalize tx:", finalizeSig);
+
+      const posAfterDeposit = await program.account.userPositionAccount.fetch(byAuthPositionPda);
+      console.log("Position state after deposit:");
+      console.log("  position_state[0] (base_deposited):", Buffer.from(posAfterDeposit.positionState[0]).toString("hex"));
+      console.log("  position_state[1] (quote_deposited):", Buffer.from(posAfterDeposit.positionState[1]).toString("hex"));
+    });
+
+    it("computes withdrawal by authority", async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const sharedNonce = randomBytes(16);
+
+      const finalizeSig = await queueWithRetry(
+        "computeWithdrawalByAuthority",
+        async (computationOffset) => {
+          return program.methods
+            .computeWithdrawalByAuthority(
+              Array.from(userIdHash) as number[],
+              computationOffset,
+              Array.from(encryptionKeys.publicKey) as number[],
+              new anchor.BN(deserializeLE(sharedNonce).toString())
+            )
+            .accountsPartial({
+              authority: owner.publicKey,
+              signPdaAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+              computationAccount: getComputationAccAddress(
+                actualClusterOffset,
+                computationOffset
+              ),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("compute_withdrawal")).readUInt32LE()
+              ),
+              clusterAccount,
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+              vault: vaultPda,
+              userPosition: byAuthPositionPda,
+            })
+            .signers([owner])
+            .rpc({ commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("[SIGNER] computeWithdrawalByAuthority => owner:", owner.publicKey.toString());
+      console.log("Withdrawal computation by authority succeeded, finalize tx:", finalizeSig);
+    });
+
+    it("clears position (by_authority position)", async () => {
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const signPdaAccount = PublicKey.findProgramAddressSync(
+        [Buffer.from("ArciumSignerAccount")],
+        program.programId
+      )[0];
+
+      const baseWithdrawAmount = new anchor.BN(25_000_000);
+      const quoteWithdrawAmount = new anchor.BN(25_000_000);
+
+      const finalizeSig = await queueWithRetry(
+        "clearPositionByAuth",
+        async (computationOffset) => {
+          return program.methods
+            .clearPosition(computationOffset, baseWithdrawAmount, quoteWithdrawAmount)
+            .accountsPartial({
+              authority: owner.publicKey,
+              vault: vaultPda,
+              userPosition: byAuthPositionPda,
+              signPdaAccount,
+              computationAccount: getComputationAccAddress(
+                actualClusterOffset,
+                computationOffset
+              ),
+              clusterAccount,
+              mxeAccount: getMXEAccAddress(program.programId),
+              mempoolAccount: getMempoolAccAddress(actualClusterOffset),
+              executingPool: getExecutingPoolAccAddress(actualClusterOffset),
+              compDefAccount: getCompDefAccAddress(
+                program.programId,
+                Buffer.from(getCompDefAccOffset("clear_position")).readUInt32LE()
+              ),
+              poolAccount: getFeePoolAccAddress(),
+              clockAccount: getClockAccAddress(),
+              systemProgram: SystemProgram.programId,
+            })
+            .signers([owner])
+            .rpc({ skipPreflight: true, commitment: "confirmed" });
+        },
+        provider,
+        program.programId,
+      );
+
+      console.log("Clear position (by_authority) succeeded, finalize tx:", finalizeSig);
+    });
+
+    it("gets user position (by_authority position)", async () => {
+      // NOTE: get_user_position MPC instruction uses [b"position", vault, user.key()] PDA seeds,
+      // which requires the `user` signer's pubkey to match the PDA derivation.
+      // For _by_authority positions, the PDA uses user_id_hash (a SHA-256 hash), so there's
+      // no private key to sign with. We verify the position account directly instead.
+      const posAccount = await program.account.userPositionAccount.fetch(byAuthPositionPda);
+      expect(posAccount.owner.toString()).to.equal(new PublicKey(userIdHash).toString());
+      expect(posAccount.vault.toString()).to.equal(vaultPda.toString());
+
+      // Verify encrypted state is non-zero (MPC deposit has populated it)
+      const state = posAccount.positionState as number[][];
+      const hasData = state.some((slot: number[]) => slot.some((b: number) => b !== 0));
+      expect(hasData).to.be.true;
+      console.log("Get user position (by_authority) verified via direct fetch");
+      console.log("  Owner:", posAccount.owner.toString());
+      console.log("  Has encrypted data:", hasData);
+    });
+
+    it("verifies old + new position PDA derivations coexist", async () => {
+      // Old-style position PDA: [b"position", vault, user_pubkey]
+      const oldPositionPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), owner.publicKey.toBuffer()],
+        program.programId
+      )[0];
+
+      // New-style position PDA: [b"position", vault, user_id_hash]
+      const newPositionPda = PublicKey.findProgramAddressSync(
+        [Buffer.from("position"), vaultPda.toBuffer(), userIdHash],
+        program.programId
+      )[0];
+
+      // Both should exist and be different PDAs
+      expect(oldPositionPda.toString()).to.not.equal(newPositionPda.toString());
+      console.log("Old-style position PDA:", oldPositionPda.toString());
+      console.log("New-style position PDA:", newPositionPda.toString());
+
+      // Verify both accounts exist on-chain
+      const oldAccount = await provider.connection.getAccountInfo(oldPositionPda);
+      const newAccount = await provider.connection.getAccountInfo(newPositionPda);
+      expect(oldAccount).to.not.be.null;
+      expect(newAccount).to.not.be.null;
+      console.log("Both old and new position accounts exist on-chain");
     });
   });
 
