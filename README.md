@@ -19,7 +19,7 @@ On-chain DeFi is fully transparent. Swaps, liquidity provision, and pool creatio
 Zodiac Liquidity combines **MPC encryption** and a **ZK mixer** for full privacy across swap and LP.
 
 - **Encrypted state** — Deposit amounts and positions are encrypted by Arcium's MPC network. No single party can decrypt, not even the protocol operator.
-- **Identity unlinkability** — The ZK mixer breaks the link between user wallets and actions. Single-use ephemeral wallets prevent cross-operation tracing.
+- **Identity unlinkability** — The ZK mixer breaks the link between user wallets and actions. Users are identified by `user_id_hash` (SHA-256 of userId), never by wallet address.
 - **User-only results** — When a user queries their position or withdraws, the MPC network re-encrypts the result for that user's key. Only the user can read it.
 
 ### What's Hidden vs Visible
@@ -38,9 +38,9 @@ Zodiac Liquidity combines **MPC encryption** and a **ZK mixer** for full privacy
 ```
 User → App (swap / LP / create pool)
          ↓
-       ZK Mixer (breaks identity link) → Ephemeral wallet
+       ZK Mixer (breaks identity link) → Authority wallet
          ↓
-       Operator (fund relay → execute on Meteora → return to user)
+       Operator/Authority (fund relay → execute on Meteora → return to user)
          ↓
        Meteora DAMM v2
 ```
@@ -48,8 +48,8 @@ User → App (swap / LP / create pool)
 **LP (current — single-sign flow):**
 
 ```
-DEPOSIT:  User --sign--> Mixer --> Vault (MPC encrypt) --> Meteora pool
-WITHDRAW: User --intent--> Vault (MPC compute share) --> Meteora pool --> Destination wallet
+DEPOSIT:  User --sign--> Mixer --> Authority (MPC encrypt via deposit_by_authority) --> Meteora pool
+WITHDRAW: User --intent--> Authority (MPC compute via compute_withdrawal_by_authority) --> Meteora pool --> Destination wallet
 ```
 
 User signs 1-2 wallet txs to deposit into the mixer, then everything else happens automatically: ZK proof generation, mixer withdrawal, MPC encryption, and Meteora LP deployment.
@@ -79,11 +79,11 @@ zodiac-liquidity/
 │   └── zodiac_mixer/              # ZK Mixer program (Groth16, Merkle tree, SOL/SPL, pause)
 ├── encrypted-ixs/                 # Arcis MPC circuits (8 circuits)
 ├── tests/
-│   ├── zodiac-liquidity.ts        # Happy-path unit tests (14 tests)
-│   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (7 tests)
+│   ├── zodiac-liquidity.ts        # Happy-path unit tests (20 tests: 14 legacy + 6 authority-first)
+│   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (10 tests: 4 legacy + 6 authority-first)
 │   ├── zodiac-mixer.ts            # Mixer tests — SOL + SPL (25 tests)
-│   ├── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests)
-│   └── zodiac-full-privacy-integration.ts # Full mixer->zodiac->meteora flow (39 tests)
+│   ├── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests, authority-first)
+│   └── zodiac-full-privacy-integration.ts # Full mixer->zodiac->meteora flow (39 tests, authority-first)
 ├── scripts/                       # Utility scripts (cleanup, analysis)
 └── build/                         # Compiled circuits (.arcis, .hash)
 ```
@@ -101,10 +101,12 @@ See `Anchor.toml` and operator/relayer config for current IDs.
 
 | Environment | Tests | Status |
 |-------------|-------|--------|
-| Localnet | 39/39 full privacy integration (mixer + MPC + Meteora) | Passing |
-| Localnet | 62/62 (25 mixer + 37 integration) | Passing |
+| Devnet | 131/131 total | Passing (2026-02-05) |
+| Devnet | 20/20 liquidity (14 legacy + 6 authority-first) | Passing |
+| Devnet | 10/10 liquidity-fail (4 legacy + 6 authority-first) | Passing |
+| Devnet | 37/37 integration (3-user sequential, authority-first) | Passing |
 | Devnet | 25/25 mixer (17 SOL + 8 SPL) | Passing |
-| Devnet | 37/37 integration (3-user sequential) | Passing |
+| Devnet | 39/39 full privacy (mixer + MPC + Meteora, authority-first) | Passing |
 
 ## Roadmap
 
@@ -120,24 +122,23 @@ All of the above is testable on localnet without ARX nodes.
 ## Full Transaction Flow (Single-Sign LP)
 
 ```
-DEPOSIT (user signs 1-2 txs, operator handles steps 4-13):
- 1. [user]       mixer.transact(proof)              -- deposit base SPL to mixer (wallet signs)
- 2. [user]       mixer.transact(proof)              -- deposit quote SOL to mixer (wallet signs)
- 3. [app]        POST /deposit/private               -- send commitment secrets to operator
- 4. [operator]   -- waits for privacy delay --       -- anonymity set growth
- 5. [operator]   generates ZK proofs (snarkjs)       -- server-side Groth16 proof generation
- 6. [relayer]    mixer.transact(proof)               -- withdraw base + quote to intermediate wallet
- 7. [authority]  zodiac.register_ephemeral_wallet()  -- register ephemeral wallet PDA
- 8. [ephemeral]  zodiac.deposit(encrypted_amt)       -- deposit to vault (Arcium encrypts)
- 9. [authority]  zodiac.reveal_pending_deposits()     -- Arcium reveals aggregate
-10. [authority]  zodiac.fund_relay(idx, amount)       -- vault -> relay PDA
-11. [ephemeral]  zodiac.deposit_to_meteora(...)       -- relay PDA -> Meteora add_liquidity
-12. [authority]  zodiac.record_liquidity(delta)       -- record in Arcium
+DEPOSIT (user signs 1-2 txs, authority handles steps 4-13):
+ 1. [user]       mixer.transact(proof)                        -- deposit base SPL to mixer (wallet signs)
+ 2. [user]       mixer.transact(proof)                        -- deposit quote SOL to mixer (wallet signs)
+ 3. [app]        POST /deposit/private                         -- send commitment secrets to operator
+ 4. [operator]   -- waits for privacy delay --                 -- anonymity set growth
+ 5. [operator]   generates ZK proofs (snarkjs)                 -- server-side Groth16 proof generation
+ 6. [relayer]    mixer.transact(proof)                         -- withdraw base + quote to authority wallet
+ 7. [authority]  zodiac.create_user_position_by_authority()     -- create position (user_id_hash PDA)
+ 8. [authority]  zodiac.deposit_by_authority(encrypted_amt)     -- deposit from authority's token accounts
+ 9. [authority]  zodiac.reveal_pending_deposits()               -- Arcium reveals aggregate
+10. [authority]  zodiac.fund_relay(idx, amount)                 -- vault -> relay PDA
+11. [authority]  zodiac.deposit_to_meteora(...)                 -- authority signs Meteora add_liquidity
+12. [authority]  zodiac.record_liquidity(delta)                 -- record in Arcium
 
 WITHDRAWAL:
-13. [ephemeral]  zodiac.withdraw(pubkey, nonce)       -- Arcium computes share
-14. [ephemeral]  zodiac.withdraw_from_meteora(...)    -- relay removes liquidity
-15. [authority]  zodiac.relay_transfer_to_dest()      -- relay -> destination wallet
-16. [authority]  zodiac.clear_position(base, quote)    -- zero Arcium state
-17. [authority]  zodiac.close_ephemeral_wallet()      -- close PDA, reclaim rent
+13. [authority]  zodiac.compute_withdrawal_by_authority()       -- Arcium computes share
+14. [authority]  zodiac.withdraw_from_meteora(...)              -- authority signs Meteora remove_liquidity
+15. [authority]  zodiac.relay_transfer_to_dest()                -- relay -> destination wallet
+16. [authority]  zodiac.clear_position(base, quote)             -- zero Arcium state
 ```

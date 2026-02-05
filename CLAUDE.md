@@ -1,7 +1,7 @@
 # Zodiac On-Chain Programs — Integration Reference
 
 > For Claude Code agents integrating the on-chain programs into the app, operator, or relayer.
-> Last updated: 2026-02-04
+> Last updated: 2026-02-05
 
 ## Program IDs (Devnet)
 
@@ -24,7 +24,7 @@
 
 **zodiac_mixer** — ZK privacy mixer. Users deposit SOL/SPL tokens with a Groth16 ZK proof. Later, they (or a relayer) withdraw to a different wallet using another ZK proof. The mixer breaks the link between depositor and withdrawer. Uses a Merkle tree (height 26) and nullifiers for double-spend prevention.
 
-**zodiac_liquidity** — Private liquidity vault. Takes funds from mixer withdrawals, encrypts amounts via Arcium MPC, deploys to Meteora DAMM v2 pools through a relay PDA. Individual deposit sizes stay hidden. Uses ephemeral wallets per operation to prevent cross-operation linkability.
+**zodiac_liquidity** — Private liquidity vault. Takes funds from mixer withdrawals, encrypts amounts via Arcium MPC, deploys to Meteora DAMM v2 pools through a relay PDA. Individual deposit sizes stay hidden. Supports two flows: legacy (user signs, ephemeral wallets) and authority-first (authority signs on behalf of users identified by `user_id_hash`).
 
 ## The Single-Sign Privacy Flow
 
@@ -37,26 +37,26 @@ WHO DOES WHAT:
   [relayer]   = Relayer service (:3002) — called by operator, not app
   [mpc]       = Arcium ARX nodes (automatic callbacks)
 
-DEPOSIT (Steps 1-13):
-  1. [app]       → mixer.transact(proof)              Deposit base SPL to mixer (wallet signs)
-  2. [app]       → mixer.transact(proof)              Deposit quote SOL to mixer (wallet signs)
-  3. [app]       → operator POST /deposit/private      Send commitment secrets to operator
-  4. [operator]  — waits for privacy delay              Anonymity set growth
-  5. [operator]  → generates ZK proofs (snarkjs)        Server-side Groth16 proof generation
-  6. [operator]  → relayer POST /relay/withdraw         Withdraw base + quote from mixer
-  7. [operator]  → liquidity.register_ephemeral()       Register ephemeral wallet PDA
-  8. [operator]  → liquidity.deposit(encrypted_amt)     Encrypt deposit via MPC
-  9. [mpc]       → liquidity.deposit_callback()         MPC updates vault + position
- 10. [operator]  → liquidity.reveal_pending()           MPC reveals aggregate amounts
- 11. [operator]  → liquidity.fund_relay(amount)         Move tokens to relay PDA
- 12. [operator]  → liquidity.deposit_to_meteora()       Relay PDA adds liquidity to Meteora
- 13. [operator]  → liquidity.record_liquidity(delta)    MPC records liquidity share
+DEPOSIT (Steps 1-13, authority-first flow):
+  1. [app]       → mixer.transact(proof)                        Deposit base SPL to mixer (wallet signs)
+  2. [app]       → mixer.transact(proof)                        Deposit quote SOL to mixer (wallet signs)
+  3. [app]       → operator POST /deposit/private                Send commitment secrets to operator
+  4. [operator]  — waits for privacy delay                       Anonymity set growth
+  5. [operator]  → generates ZK proofs (snarkjs)                 Server-side Groth16 proof generation
+  6. [operator]  → relayer POST /relay/withdraw                  Withdraw base + quote from mixer to authority
+  7. [authority] → liquidity.create_user_position_by_authority()  Create position (user_id_hash PDA)
+  8. [authority] → liquidity.deposit_by_authority(encrypted_amt)  Deposit from authority's token accounts
+  9. [mpc]       → liquidity.deposit_callback()                  MPC updates vault + position
+ 10. [authority] → liquidity.reveal_pending()                    MPC reveals aggregate amounts
+ 11. [authority] → liquidity.fund_relay(amount)                  Move tokens to relay PDA
+ 12. [authority] → liquidity.deposit_to_meteora()                Authority signs Meteora add_liquidity
+ 13. [authority] → liquidity.record_liquidity(delta)             MPC records liquidity share
 
-WITHDRAWAL (Steps 14-17):
- 14. [operator]  → liquidity.withdraw(pubkey, nonce)    MPC computes user's share
- 15. [operator]  → liquidity.withdraw_from_meteora()    Relay removes liquidity
- 16. [operator]  → liquidity.relay_transfer_to_dest()   Move tokens to ephemeral wallet
- 17. [operator]  → liquidity.clear_position()           Zero out MPC state + close ephemeral
+WITHDRAWAL (Steps 14-17, authority-first flow):
+ 14. [authority] → liquidity.compute_withdrawal_by_authority()   MPC computes user's share
+ 15. [authority] → liquidity.withdraw_from_meteora()             Authority signs Meteora remove_liquidity
+ 16. [authority] → liquidity.relay_transfer_to_dest()            Move tokens to destination wallet
+ 17. [authority] → liquidity.clear_position()                    Zero out MPC state
 ```
 
 ## Mixer Instructions (zodiac_mixer)
@@ -113,13 +113,25 @@ The operator calls these. The app never calls these directly.
 | Queue Instruction | Callback | Purpose |
 |-------------------|----------|---------|
 | `create_vault` | `init_vault_callback` | Initialize encrypted vault state |
-| `create_user_position` | `init_user_position_callback` | Initialize user's encrypted position |
-| `deposit` | `deposit_callback` | Encrypt dual-token deposit (base + quote) |
+| `create_user_position` | `init_user_position_callback` | Initialize user's encrypted position (user signs, PDA from user pubkey) |
+| `create_user_position_by_authority` | `init_user_position_callback` | Initialize position (authority signs, PDA from `user_id_hash`) |
+| `deposit` | `deposit_callback` | Encrypt dual-token deposit (user signs) |
+| `deposit_by_authority` | `deposit_callback` | Encrypt dual-token deposit (authority signs, authority's token accounts) |
 | `reveal_pending_deposits` | `reveal_pending_deposits_callback` | Reveal aggregate for Meteora deployment |
 | `record_liquidity` | `record_liquidity_callback` | Record Meteora liquidity in MPC state |
-| `withdraw` | `compute_withdrawal_callback` | Compute user's withdrawal share |
+| `withdraw` | `compute_withdrawal_callback` | Compute user's withdrawal share (user signs) |
+| `compute_withdrawal_by_authority` | `compute_withdrawal_callback` | Compute withdrawal share (authority signs, PDA from `user_id_hash`) |
 | `clear_position` | `clear_position_callback` | Zero position after withdrawal |
-| `get_user_position` | `get_user_position_callback` | Let user see their own position |
+| `get_user_position` | `get_user_position_callback` | Let user see their own position (user signs, PDA from user pubkey) |
+
+### Authority-First vs Legacy Position PDA
+
+| Flow | Position PDA Seeds | Who Signs | Position `owner` Field |
+|------|--------------------|-----------|------------------------|
+| Legacy | `[b"position", vault, user_pubkey]` | User wallet | User's pubkey |
+| Authority-first | `[b"position", vault, sha256(userId)]` | Authority | `Pubkey::new_from_array(user_id_hash)` |
+
+**Note:** `get_user_position` only works with legacy positions (requires signer whose pubkey matches PDA seed). For authority-first positions, read the account directly via `program.account.userPositionAccount.fetch(positionPda)`.
 
 ### Relay Management (operator calls)
 
@@ -137,7 +149,7 @@ The operator calls these. The app never calls these directly.
 | `register_ephemeral_wallet` | Register ephemeral wallet PDA (authority only) |
 | `close_ephemeral_wallet` | Close PDA, return rent to authority |
 
-### Meteora CPI (operator calls, requires registered ephemeral wallet)
+### Meteora CPI (authority signs directly, enforces `vault.authority == payer`)
 
 | Instruction | Purpose |
 |-------------|---------|
@@ -146,6 +158,8 @@ The operator calls these. The app never calls these directly.
 | `create_meteora_position` | Create Meteora position for relay PDA |
 | `deposit_to_meteora_damm_v2` | Add liquidity to Meteora pool |
 | `withdraw_from_meteora_damm_v2` | Remove liquidity from Meteora pool |
+
+**Note:** Meteora CPI instructions no longer require ephemeral wallet registration. The `payer` must be the vault authority. Old ephemeral wallet instructions (`register_ephemeral_wallet`, `close_ephemeral_wallet`) still exist for backward compatibility.
 
 ## Encrypted State (what Arcium MPC stores)
 
