@@ -323,6 +323,56 @@ pub mod zodiac_liquidity {
     }
 
     // ============================================================
+    // CREATE USER POSITION BY AUTHORITY (authority creates on behalf of user)
+    // ============================================================
+
+    /// Creates a new encrypted user position on behalf of a user, signed by authority.
+    ///
+    /// @dev Position PDA seeded by user_id_hash (sha256 of userId) instead of user pubkey.
+    ///      This allows the authority to create positions without the user signing.
+    /// @dev The position "owner" field stores the user_id_hash as a Pubkey.
+    ///
+    /// @param user_id_hash SHA-256 hash of the user ID (32 bytes).
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param nonce Random u128 for initial encryption nonce.
+    pub fn create_user_position_by_authority(
+        ctx: Context<CreateUserPositionByAuthority>,
+        user_id_hash: [u8; 32],
+        computation_offset: u64,
+        nonce: u128,
+    ) -> Result<()> {
+        msg!("Creating user position by authority");
+
+        ctx.accounts.user_position.bump = ctx.bumps.user_position;
+        ctx.accounts.user_position.owner = Pubkey::new_from_array(user_id_hash);
+        ctx.accounts.user_position.vault = ctx.accounts.vault.key();
+        ctx.accounts.user_position.nonce = nonce;
+        ctx.accounts.user_position.position_state = [[0; 32]; 3];
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new().plaintext_u128(nonce).build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            vec![InitUserPositionCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[CallbackAccount {
+                    pubkey: ctx.accounts.user_position.key(),
+                    is_writable: true,
+                }],
+            )?],
+            1,
+            0,
+        )?;
+
+        Ok(())
+    }
+
+    // ============================================================
     // DEPOSIT (adds encrypted amount to vault and user position)
     // ============================================================
 
@@ -467,6 +517,108 @@ pub mod zodiac_liquidity {
             vault: ctx.accounts.vault.key(),
             user: ctx.accounts.user_position.owner,
         });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // DEPOSIT BY AUTHORITY (authority deposits on behalf of user)
+    // ============================================================
+
+    /// Deposits tokens from authority's accounts into the vault on behalf of a user.
+    ///
+    /// @dev Authority signs and owns the source token accounts. Position PDA uses
+    ///      user_id_hash seeds. Same MPC circuit as regular deposit.
+    ///
+    /// @param user_id_hash SHA-256 hash of the user ID (32 bytes).
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param encrypted_base_amount User-encrypted base deposit amount (x25519).
+    /// @param encrypted_quote_amount User-encrypted quote deposit amount (x25519).
+    /// @param encryption_pubkey Authority's x25519 public key for shared encryption.
+    /// @param amount_nonce Nonce used for the encrypted amounts.
+    /// @param base_amount Plaintext base amount for the token transfer.
+    /// @param quote_amount Plaintext quote amount for the token transfer.
+    pub fn deposit_by_authority(
+        ctx: Context<DepositByAuthority>,
+        _user_id_hash: [u8; 32],
+        computation_offset: u64,
+        encrypted_base_amount: [u8; 32],
+        encrypted_quote_amount: [u8; 32],
+        encryption_pubkey: [u8; 32],
+        amount_nonce: u128,
+        base_amount: u64,
+        quote_amount: u64,
+    ) -> Result<()> {
+        msg!("Processing deposit by authority: {} base + {} quote tokens", base_amount, quote_amount);
+
+        // Transfer base tokens from authority to vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.authority_token_account.to_account_info(),
+                    to: ctx.accounts.vault_token_account.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            base_amount,
+        )?;
+
+        // Transfer quote tokens from authority to vault
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.authority_quote_token_account.to_account_info(),
+                    to: ctx.accounts.vault_quote_token_account.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            quote_amount,
+        )?;
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new()
+            .x25519_pubkey(encryption_pubkey)
+            .plaintext_u128(amount_nonce)
+            .encrypted_u64(encrypted_base_amount)
+            .encrypted_u64(encrypted_quote_amount)
+            .plaintext_u128(ctx.accounts.vault.nonce)
+            .account(
+                ctx.accounts.vault.key(),
+                8 + 1 + 32 + 32 + 32,
+                32 * 5,
+            )
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32,
+                32 * 3,
+            )
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            vec![DepositCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[
+                    CallbackAccount {
+                        pubkey: ctx.accounts.vault.key(),
+                        is_writable: true,
+                    },
+                    CallbackAccount {
+                        pubkey: ctx.accounts.user_position.key(),
+                        is_writable: true,
+                    },
+                ],
+            )?],
+            1,
+            0,
+        )?;
 
         Ok(())
     }
@@ -734,6 +886,66 @@ pub mod zodiac_liquidity {
             encrypted_quote_amount: o.ciphertexts[1],
             nonce: o.nonce,
         });
+
+        Ok(())
+    }
+
+    // ============================================================
+    // COMPUTE WITHDRAWAL BY AUTHORITY (authority triggers withdrawal computation)
+    // ============================================================
+
+    /// Computes a user's withdrawal amounts via MPC, signed by authority.
+    ///
+    /// @dev Same MPC circuit as regular withdraw. Position PDA uses user_id_hash seeds.
+    ///      Authority signs instead of user.
+    ///
+    /// @param user_id_hash SHA-256 hash of the user ID (32 bytes).
+    /// @param computation_offset Random u64 for computation PDA derivation.
+    /// @param encryption_pubkey x25519 public key for output encryption.
+    /// @param shared_nonce Nonce for Shared type encryption.
+    pub fn compute_withdrawal_by_authority(
+        ctx: Context<ComputeWithdrawalByAuthority>,
+        _user_id_hash: [u8; 32],
+        computation_offset: u64,
+        encryption_pubkey: [u8; 32],
+        shared_nonce: u128,
+    ) -> Result<()> {
+        msg!("Processing withdrawal by authority");
+
+        ctx.accounts.sign_pda_account.bump = ctx.bumps.sign_pda_account;
+
+        let args = ArgBuilder::new()
+            .plaintext_u128(ctx.accounts.user_position.nonce)
+            .account(
+                ctx.accounts.user_position.key(),
+                8 + 1 + 32 + 32,
+                32 * 3,
+            )
+            .x25519_pubkey(encryption_pubkey)
+            .plaintext_u128(shared_nonce)
+            .build();
+
+        queue_computation(
+            ctx.accounts,
+            computation_offset,
+            args,
+            vec![ComputeWithdrawalCallback::callback_ix(
+                computation_offset,
+                &ctx.accounts.mxe_account,
+                &[
+                    CallbackAccount {
+                        pubkey: ctx.accounts.vault.key(),
+                        is_writable: false,
+                    },
+                    CallbackAccount {
+                        pubkey: ctx.accounts.user_position.key(),
+                        is_writable: false,
+                    },
+                ],
+            )?],
+            1,
+            0,
+        )?;
 
         Ok(())
     }
@@ -1419,6 +1631,63 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Funds a relay PDA's token account from the vault's token account.
+    ///
+    /// @dev Authority-gated. The vault PDA signs the token::transfer via PDA signer seeds.
+    ///      Used after reveal_pending_deposits to move revealed deposit amounts from the
+    ///      vault's token accounts to the relay PDA for Meteora deployment — without
+    ///      requiring the authority to hold those tokens.
+    ///
+    /// Security invariants:
+    /// - Only vault authority can call.
+    /// - Vault PDA signs with seeds [b"vault", token_mint, bump].
+    /// - relay_index must be < NUM_RELAYS (12).
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param amount Number of tokens to transfer.
+    pub fn fund_relay_from_vault(
+        ctx: Context<FundRelayFromVault>,
+        relay_index: u8,
+        amount: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+        require!(
+            ctx.accounts.authority.key() == ctx.accounts.vault.authority,
+            ErrorCode::Unauthorized
+        );
+
+        msg!("Funding relay PDA {} with {} tokens from vault", relay_index, amount);
+
+        let token_mint = ctx.accounts.vault.token_mint;
+        let seeds = &[
+            b"vault".as_ref(),
+            token_mint.as_ref(),
+            &[ctx.bumps.vault],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.vault_token_account.to_account_info(),
+                    to: ctx.accounts.relay_token_account.to_account_info(),
+                    authority: ctx.accounts.vault.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            amount,
+        )?;
+
+        emit!(RelayFundedEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            amount,
+        });
+
+        Ok(())
+    }
+
     // ============================================================
     // RELAY TRANSFER TO DESTINATION (withdrawal last mile)
     // ============================================================
@@ -1989,6 +2258,66 @@ pub struct CreateUserPosition<'info> {
     pub user_position: Account<'info, UserPositionAccount>,
 }
 
+#[queue_computation_accounts("init_user_position", authority)]
+#[derive(Accounts)]
+#[instruction(user_id_hash: [u8; 32], computation_offset: u64)]
+pub struct CreateUserPositionByAuthority<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_INIT_USER_POSITION))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        init_if_needed,
+        payer = authority,
+        space = 8 + UserPositionAccount::INIT_SPACE,
+        seeds = [b"position", vault.key().as_ref(), &user_id_hash],
+        bump,
+    )]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
 #[queue_computation_accounts("deposit", depositor)]
 #[derive(Accounts)]
 #[instruction(computation_offset: u64)]
@@ -2077,6 +2406,105 @@ pub struct Deposit<'info> {
         token::authority = depositor,
     )]
     pub user_quote_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// Vault's quote token account (destination)
+    #[account(
+        mut,
+        token::mint = quote_mint,
+        token::authority = vault,
+    )]
+    pub vault_quote_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    pub token_program: Program<'info, anchor_spl::token::Token>,
+}
+
+#[queue_computation_accounts("deposit", authority)]
+#[derive(Accounts)]
+#[instruction(user_id_hash: [u8; 32], computation_offset: u64)]
+pub struct DepositByAuthority<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_DEPOSIT))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut, has_one = token_mint, has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Box<Account<'info, VaultAccount>>,
+
+    #[account(
+        mut,
+        seeds = [b"position", vault.key().as_ref(), &user_id_hash],
+        bump = user_position.bump,
+    )]
+    pub user_position: Box<Account<'info, UserPositionAccount>>,
+
+    /// Base token mint for this vault
+    pub token_mint: Box<Account<'info, anchor_spl::token::Mint>>,
+
+    /// Quote token mint for this vault (typically WSOL)
+    #[account(address = vault.quote_mint)]
+    pub quote_mint: Box<Account<'info, anchor_spl::token::Mint>>,
+
+    /// Authority's base token account (source)
+    #[account(
+        mut,
+        token::mint = token_mint,
+        token::authority = authority,
+    )]
+    pub authority_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// Vault's base token account (destination)
+    #[account(
+        mut,
+        token::mint = token_mint,
+        token::authority = vault,
+    )]
+    pub vault_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
+
+    /// Authority's quote token account (source)
+    #[account(
+        mut,
+        token::mint = quote_mint,
+        token::authority = authority,
+    )]
+    pub authority_quote_token_account: Box<Account<'info, anchor_spl::token::TokenAccount>>,
 
     /// Vault's quote token account (destination)
     #[account(
@@ -2244,6 +2672,64 @@ pub struct Withdraw<'info> {
     #[account(
         mut,
         seeds = [b"position", vault.key().as_ref(), user.key().as_ref()],
+        bump = user_position.bump,
+    )]
+    pub user_position: Account<'info, UserPositionAccount>,
+}
+
+#[queue_computation_accounts("compute_withdrawal", authority)]
+#[derive(Accounts)]
+#[instruction(user_id_hash: [u8; 32], computation_offset: u64)]
+pub struct ComputeWithdrawalByAuthority<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        init_if_needed,
+        space = 9,
+        payer = authority,
+        seeds = [&SIGN_PDA_SEED],
+        bump,
+        address = derive_sign_pda!(),
+    )]
+    pub sign_pda_account: Account<'info, ArciumSignerAccount>,
+
+    #[account(address = derive_mxe_pda!())]
+    pub mxe_account: Box<Account<'info, MXEAccount>>,
+
+    #[account(mut, address = derive_mempool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: mempool_account
+    pub mempool_account: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_execpool_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: executing_pool
+    pub executing_pool: UncheckedAccount<'info>,
+
+    #[account(mut, address = derive_comp_pda!(computation_offset, mxe_account, ErrorCode::ClusterNotSet))]
+    /// CHECK: computation_account
+    pub computation_account: UncheckedAccount<'info>,
+
+    #[account(address = derive_comp_def_pda!(COMP_DEF_OFFSET_WITHDRAW))]
+    pub comp_def_account: Box<Account<'info, ComputationDefinitionAccount>>,
+
+    #[account(mut, address = derive_cluster_pda!(mxe_account, ErrorCode::ClusterNotSet))]
+    pub cluster_account: Box<Account<'info, Cluster>>,
+
+    #[account(mut, address = ARCIUM_FEE_POOL_ACCOUNT_ADDRESS)]
+    pub pool_account: Box<Account<'info, FeePool>>,
+
+    #[account(mut, address = ARCIUM_CLOCK_ACCOUNT_ADDRESS)]
+    pub clock_account: Box<Account<'info, ClockAccount>>,
+
+    pub system_program: Program<'info, System>,
+    pub arcium_program: Program<'info, Arcium>,
+
+    #[account(mut, has_one = authority @ ErrorCode::Unauthorized)]
+    pub vault: Account<'info, VaultAccount>,
+
+    #[account(
+        mut,
+        seeds = [b"position", vault.key().as_ref(), &user_id_hash],
         bump = user_position.bump,
     )]
     pub user_position: Account<'info, UserPositionAccount>,
@@ -2531,14 +3017,9 @@ pub struct DepositToMeteoraDammV2<'info> {
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
     )]
     pub vault: Account<'info, VaultAccount>,
-
-    #[account(
-        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
-        bump = ephemeral_wallet.bump,
-    )]
-    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that owns the Meteora position
     /// CHECK: Derived from vault + relay_index seeds
@@ -2606,14 +3087,9 @@ pub struct WithdrawFromMeteoraDammV2<'info> {
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
     )]
     pub vault: Account<'info, VaultAccount>,
-
-    #[account(
-        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
-        bump = ephemeral_wallet.bump,
-    )]
-    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that owns the Meteora position
     /// CHECK: Derived from vault + relay_index seeds
@@ -2684,14 +3160,9 @@ pub struct CreateMeteoraPosition<'info> {
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
     )]
     pub vault: Account<'info, VaultAccount>,
-
-    #[account(
-        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
-        bump = ephemeral_wallet.bump,
-    )]
-    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that will own the Meteora position and pay rent
     /// CHECK: Derived from vault + relay_index seeds
@@ -2758,14 +3229,9 @@ pub struct CreatePoolViaRelay<'info> {
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
     )]
     pub vault: Account<'info, VaultAccount>,
-
-    #[account(
-        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
-        bump = ephemeral_wallet.bump,
-    )]
-    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that acts as payer + creator for pool initialization
     /// CHECK: Derived from vault + relay_index seeds
@@ -2853,14 +3319,9 @@ pub struct CreateCustomizablePoolViaRelay<'info> {
     #[account(
         seeds = [b"vault", vault.token_mint.as_ref()],
         bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
     )]
     pub vault: Account<'info, VaultAccount>,
-
-    #[account(
-        seeds = [b"ephemeral", vault.key().as_ref(), payer.key().as_ref()],
-        bump = ephemeral_wallet.bump,
-    )]
-    pub ephemeral_wallet: Account<'info, EphemeralWalletAccount>,
 
     /// Relay PDA that acts as payer + creator for pool initialization
     /// CHECK: Derived from vault + relay_index seeds
@@ -2961,6 +3422,45 @@ pub struct FundRelay<'info> {
         token::authority = authority,
     )]
     pub authority_token_account: Account<'info, anchor_spl::token::TokenAccount>,
+
+    /// Relay PDA's token account (destination)
+    #[account(
+        mut,
+        token::authority = relay_pda,
+    )]
+    pub relay_token_account: Account<'info, anchor_spl::token::TokenAccount>,
+
+    pub token_program: Program<'info, anchor_spl::token::Token>,
+}
+
+/// Accounts for funding a relay PDA's token account from the vault's token account.
+/// The vault PDA signs the transfer (not the authority).
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct FundRelayFromVault<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA (for derivation verification only)
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// Vault's token account (source, authority = vault PDA)
+    #[account(
+        mut,
+        token::authority = vault,
+    )]
+    pub vault_token_account: Account<'info, anchor_spl::token::TokenAccount>,
 
     /// Relay PDA's token account (destination)
     #[account(
