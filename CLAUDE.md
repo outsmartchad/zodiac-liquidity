@@ -13,12 +13,12 @@
 
 ## Test Status
 
-122/122 devnet tests passing (2026-02-04):
-- `zodiac-liquidity.ts` — 14 happy-path tests
-- `zodiac-liquidity-fail.ts` — 7 auth/fail tests
-- `zodiac-mpc-meteora-integration.ts` — 37 integration tests (3-user sequential)
+131/131 devnet tests passing (2026-02-05):
+- `zodiac-liquidity.ts` — 20 happy-path tests (14 legacy + 6 authority-first)
+- `zodiac-liquidity-fail.ts` — 10 auth/fail tests (4 legacy + 6 authority-first)
+- `zodiac-mpc-meteora-integration.ts` — 37 integration tests (3-user sequential, authority-first)
 - `zodiac-mixer.ts` — 25 mixer tests (17 SOL + 8 SPL)
-- `zodiac-full-privacy-integration.ts` — 39 full privacy tests (mixer + MPC + Meteora)
+- `zodiac-full-privacy-integration.ts` — 39 full privacy tests (mixer + MPC + Meteora, authority-first)
 
 ## What Each Program Does
 
