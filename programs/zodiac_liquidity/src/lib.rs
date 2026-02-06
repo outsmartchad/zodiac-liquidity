@@ -1330,6 +1330,87 @@ pub mod zodiac_liquidity {
         Ok(())
     }
 
+    /// Executes a token swap on a Meteora DAMM v2 pool via relay PDA CPI.
+    ///
+    /// @dev The relay PDA (seeds: [b"zodiac_relay", vault, relay_index]) signs the CPI
+    ///      to Meteora's swap instruction. The relay PDA acts as the payer (swapper).
+    ///      Input tokens must already be in the relay's token account before calling.
+    ///
+    /// Privacy model:
+    /// - User deposited input token into mixer (identity broken by ZK proof).
+    /// - Operator withdrew from mixer to authority, then funded relay PDA.
+    /// - On-chain observers see the relay PDA swapping, not the user.
+    /// - No MPC needed — swap is stateless (no encrypted balance to maintain).
+    ///
+    /// Security invariants:
+    /// - Requires vault.authority == payer (authority-only).
+    /// - relay_index must be < NUM_RELAYS (12).
+    /// - minimum_amount_out enforces slippage protection on-chain (Meteora reverts if not met).
+    /// - Emits SwapViaRelayEvent for off-chain tracking.
+    ///
+    /// @param relay_index Index of the relay PDA (0..11).
+    /// @param amount_in Amount of input token to swap.
+    /// @param minimum_amount_out Minimum output token to receive (slippage protection).
+    pub fn swap_via_relay(
+        ctx: Context<SwapViaRelay>,
+        relay_index: u8,
+        amount_in: u64,
+        minimum_amount_out: u64,
+    ) -> Result<()> {
+        require!(relay_index < NUM_RELAYS, ErrorCode::InvalidRelayIndex);
+
+        msg!("Relay PDA {} swapping {} tokens (min out: {})", relay_index, amount_in, minimum_amount_out);
+
+        let vault_key = ctx.accounts.vault.key();
+        let seeds = &[
+            b"zodiac_relay".as_ref(),
+            vault_key.as_ref(),
+            &[relay_index],
+            &[ctx.bumps.relay_pda],
+        ];
+        let signer_seeds = &[&seeds[..]];
+
+        let cpi_accounts = damm_v2::cpi::accounts::Swap {
+            pool_authority: ctx.accounts.pool_authority.to_account_info(),
+            pool: ctx.accounts.pool.to_account_info(),
+            input_token_account: ctx.accounts.input_token_account.to_account_info(),
+            output_token_account: ctx.accounts.output_token_account.to_account_info(),
+            token_a_vault: ctx.accounts.token_a_vault.to_account_info(),
+            token_b_vault: ctx.accounts.token_b_vault.to_account_info(),
+            token_a_mint: ctx.accounts.token_a_mint.to_account_info(),
+            token_b_mint: ctx.accounts.token_b_mint.to_account_info(),
+            payer: ctx.accounts.relay_pda.to_account_info(),
+            token_a_program: ctx.accounts.token_a_program.to_account_info(),
+            token_b_program: ctx.accounts.token_b_program.to_account_info(),
+            referral_token_account: None,
+            event_authority: ctx.accounts.event_authority.to_account_info(),
+            program: ctx.accounts.amm_program.to_account_info(),
+        };
+
+        let cpi_ctx = CpiContext::new_with_signer(
+            ctx.accounts.amm_program.to_account_info(),
+            cpi_accounts,
+            signer_seeds,
+        );
+
+        damm_v2::cpi::swap(
+            cpi_ctx,
+            damm_v2::types::SwapParameters {
+                amount_in,
+                minimum_amount_out,
+            },
+        )?;
+
+        emit!(SwapViaRelayEvent {
+            vault: ctx.accounts.vault.key(),
+            relay_index,
+            amount_in,
+            minimum_amount_out,
+        });
+
+        Ok(())
+    }
+
     /// Creates a Meteora DAMM v2 position for a relay PDA.
     ///
     /// @dev Called once per relay per pool. The RelayPositionTracker PDA
@@ -3150,6 +3231,71 @@ pub struct WithdrawFromMeteoraDammV2<'info> {
     pub amm_program: UncheckedAccount<'info>,
 }
 
+/// Accounts for swapping tokens on Meteora via Relay PDA
+#[derive(Accounts)]
+#[instruction(relay_index: u8)]
+pub struct SwapViaRelay<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+
+    #[account(
+        seeds = [b"vault", vault.token_mint.as_ref()],
+        bump = vault.bump,
+        constraint = vault.authority == payer.key() @ ErrorCode::Unauthorized,
+    )]
+    pub vault: Account<'info, VaultAccount>,
+
+    /// Relay PDA that signs the swap CPI
+    /// CHECK: Derived from vault + relay_index seeds
+    #[account(
+        seeds = [b"zodiac_relay", vault.key().as_ref(), &[relay_index]],
+        bump,
+    )]
+    pub relay_pda: UncheckedAccount<'info>,
+
+    /// CHECK: Must match DAMM v2 pool authority
+    #[account(address = damm_v2_pool_authority())]
+    pub pool_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub pool: UncheckedAccount<'info>,
+
+    /// Relay's input token account (source of swap)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub input_token_account: UncheckedAccount<'info>,
+
+    /// Relay's output token account (receives swap output)
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub output_token_account: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_a_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    #[account(mut)]
+    pub token_b_vault: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_a_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by DAMM v2 program
+    pub token_b_mint: UncheckedAccount<'info>,
+
+    pub token_a_program: Interface<'info, TokenInterface>,
+    pub token_b_program: Interface<'info, TokenInterface>,
+
+    /// CHECK: Derived from DAMM v2 program seeds
+    pub event_authority: UncheckedAccount<'info>,
+
+    /// CHECK: Validated by address constraint
+    #[account(address = damm_v2::ID)]
+    pub amm_program: UncheckedAccount<'info>,
+}
+
 /// Accounts for creating a Meteora position for a Relay PDA
 #[derive(Accounts)]
 #[instruction(relay_index: u8)]
@@ -3698,6 +3844,14 @@ pub struct CustomizablePoolCreatedViaRelayEvent {
     pub vault: Pubkey,
     pub relay_index: u8,
     pub pool: Pubkey,
+}
+
+#[event]
+pub struct SwapViaRelayEvent {
+    pub vault: Pubkey,
+    pub relay_index: u8,
+    pub amount_in: u64,
+    pub minimum_amount_out: u64,
 }
 
 #[event]

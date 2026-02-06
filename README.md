@@ -6,9 +6,9 @@
 
 Zodiac Liquidity is a **private super app** for Meteora DAMM v2. One interface: swap, add/remove liquidity, create pools, and claim fees — with identity and amounts hidden.
 
-**Today:** Private LP. Sign once, walk away. Your deposit gets encrypted and deployed to Meteora automatically.
+**Today:** Private LP and private swaps. Sign once, walk away. Your deposit/swap gets encrypted and deployed to Meteora automatically.
 
-**Next:** Private swaps, private pool creation, fee claiming.
+**Next:** Private pool creation, fee claiming.
 
 ## The Problem
 
@@ -75,7 +75,7 @@ User signs 1-2 wallet txs to deposit into the mixer, then everything else happen
 ```
 zodiac-liquidity/
 ├── programs/
-│   ├── zodiac_liquidity/          # Anchor program (Arcium MPC + Meteora CPI)
+│   ├── zodiac_liquidity/          # Anchor program (Arcium MPC + Meteora CPI + Swap)
 │   └── zodiac_mixer/              # ZK Mixer program (Groth16, Merkle tree, SOL/SPL, pause)
 ├── encrypted-ixs/                 # Arcis MPC circuits (8 circuits)
 ├── tests/
@@ -83,7 +83,8 @@ zodiac-liquidity/
 │   ├── zodiac-liquidity-fail.ts   # Fail/auth unit tests (10 tests: 4 legacy + 6 authority-first)
 │   ├── zodiac-mixer.ts            # Mixer tests — SOL + SPL (25 tests)
 │   ├── zodiac-mpc-meteora-integration.ts  # 3-user end-to-end integration (37 tests, authority-first)
-│   └── zodiac-full-privacy-integration.ts # Full mixer->zodiac->meteora flow (39 tests, authority-first)
+│   ├── zodiac-full-privacy-integration.ts # Full mixer->zodiac->meteora flow (39 tests, authority-first)
+│   └── zodiac-swap.ts             # Swap tests — swap_via_relay (4 tests: bidirectional, slippage, auth)
 ├── scripts/                       # Utility scripts (cleanup, analysis)
 └── build/                         # Compiled circuits (.arcis, .hash)
 ```
@@ -101,20 +102,21 @@ See `Anchor.toml` and operator/relayer config for current IDs.
 
 | Environment | Tests | Status |
 |-------------|-------|--------|
-| Devnet | 131/131 total | Passing (2026-02-05) |
+| Devnet | 135/135 total | Passing (2026-02-06) |
 | Devnet | 20/20 liquidity (14 legacy + 6 authority-first) | Passing |
 | Devnet | 10/10 liquidity-fail (4 legacy + 6 authority-first) | Passing |
 | Devnet | 37/37 integration (3-user sequential, authority-first) | Passing |
 | Devnet | 25/25 mixer (17 SOL + 8 SPL) | Passing |
 | Devnet | 39/39 full privacy (mixer + MPC + Meteora, authority-first) | Passing |
+| Devnet | 4/4 swap (SOL→ZDC, ZDC→SOL, slippage, auth) | Passing |
 
 ## Roadmap
 
 Implementation order is documented in `.claude/plans/idempotent-whistling-dawn.md`. Summary:
 
-- **Phase 1 (on-chain):** `swap_via_relay`, `claim_position_fee_via_relay`, `close_position_via_relay` — pure Meteora CPI, no ARX.
-- **Phase 2 (operator):** PostgreSQL, swap pipeline (request → fund relay → swap → transfer), fee-claim scheduler, tx landing (Helius/Nozomi), optional Geyser pool watcher.
-- **Phase 3 (frontend):** Swap tab, pool creation page, real pool data (TVL, volume, fees) from operator.
+- **Phase 1 (on-chain):** ~~`swap_via_relay`~~(done), `claim_position_fee_via_relay`, `close_position_via_relay` — pure Meteora CPI, no ARX.
+- **Phase 2 (operator):** ~~swap pipeline~~(done), PostgreSQL, fee-claim scheduler, tx landing (Helius/Nozomi), optional Geyser pool watcher.
+- **Phase 3 (frontend):** ~~Swap tab~~(done), pool creation page, real pool data (TVL, volume, fees) from operator.
 - **Phase 4 (polish):** Auto-fill quotes, fee display, real operation polling.
 
 All of the above is testable on localnet without ARX nodes.
@@ -141,4 +143,13 @@ WITHDRAWAL:
 14. [authority]  zodiac.withdraw_from_meteora(...)              -- authority signs Meteora remove_liquidity
 15. [authority]  zodiac.relay_transfer_to_dest()                -- relay -> destination wallet
 16. [authority]  zodiac.clear_position(base, quote)             -- zero Arcium state
+
+SWAP (no MPC — stateless, privacy from mixer + relay PDA):
+17. [user]       mixer.transact(proof)                          -- deposit input token to mixer (wallet signs)
+18. [app]        POST /swap/request                              -- send commitment secret to operator
+19. [operator]   -- waits for privacy delay --                   -- anonymity set growth
+20. [relayer]    mixer.transact(proof)                           -- withdraw input from mixer to authority
+21. [authority]  zodiac.fund_relay(idx, amount)                  -- vault -> relay PDA
+22. [authority]  zodiac.swap_via_relay(amount, min_out)          -- relay PDA signs Meteora swap CPI
+23. [authority]  zodiac.relay_transfer_to_dest()                 -- relay -> destination wallet
 ```

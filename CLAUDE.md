@@ -1,7 +1,7 @@
 # Zodiac On-Chain Programs — Integration Reference
 
 > For Claude Code agents integrating the on-chain programs into the app, operator, or relayer.
-> Last updated: 2026-02-05
+> Last updated: 2026-02-06
 
 ## Program IDs (Devnet)
 
@@ -13,12 +13,13 @@
 
 ## Test Status
 
-131/131 devnet tests passing (2026-02-05):
+135/135 devnet tests passing (2026-02-06):
 - `zodiac-liquidity.ts` — 20 happy-path tests (14 legacy + 6 authority-first)
 - `zodiac-liquidity-fail.ts` — 10 auth/fail tests (4 legacy + 6 authority-first)
 - `zodiac-mpc-meteora-integration.ts` — 37 integration tests (3-user sequential, authority-first)
 - `zodiac-mixer.ts` — 25 mixer tests (17 SOL + 8 SPL)
 - `zodiac-full-privacy-integration.ts` — 39 full privacy tests (mixer + MPC + Meteora, authority-first)
+- `zodiac-swap.ts` — 4 swap tests (SOL→ZDC, ZDC→SOL, slippage protection, unauthorized rejection)
 
 ## What Each Program Does
 
@@ -57,6 +58,15 @@ WITHDRAWAL (Steps 14-17, authority-first flow):
  15. [authority] → liquidity.withdraw_from_meteora()             Authority signs Meteora remove_liquidity
  16. [authority] → liquidity.relay_transfer_to_dest()            Move tokens to destination wallet
  17. [authority] → liquidity.clear_position()                    Zero out MPC state
+
+SWAP (Steps 18-23, privacy swap flow — no MPC needed):
+ 18. [app]       → mixer.transact(proof)                        Deposit input token to mixer (wallet signs)
+ 19. [app]       → operator POST /swap/request                  Send commitment secret to operator
+ 20. [operator]  — waits for privacy delay                       Anonymity set growth
+ 21. [operator]  → relayer POST /relay/withdraw                  Withdraw input from mixer to authority
+ 22. [authority] → liquidity.fund_relay(amount)                  Move input token to relay PDA
+ 23. [authority] → liquidity.swap_via_relay(amount, min_out)     Relay PDA signs Meteora swap CPI
+ 24. [authority] → liquidity.relay_transfer_to_dest()            Move output token to destination wallet
 ```
 
 ## Mixer Instructions (zodiac_mixer)
@@ -158,8 +168,34 @@ The operator calls these. The app never calls these directly.
 | `create_meteora_position` | Create Meteora position for relay PDA |
 | `deposit_to_meteora_damm_v2` | Add liquidity to Meteora pool |
 | `withdraw_from_meteora_damm_v2` | Remove liquidity from Meteora pool |
+| `swap_via_relay` | Swap tokens via Meteora pool (relay PDA signs CPI) |
 
 **Note:** Meteora CPI instructions no longer require ephemeral wallet registration. The `payer` must be the vault authority. Old ephemeral wallet instructions (`register_ephemeral_wallet`, `close_ephemeral_wallet`) still exist for backward compatibility.
+
+### swap_via_relay Details
+
+Executes a token swap through Meteora DAMM v2 using the relay PDA as the signer. No MPC needed — swap is stateless (no encrypted balance to maintain). Privacy comes from the mixer + relay PDA pattern.
+
+**Parameters:**
+- `relay_index: u8` — Which relay PDA to use (typically 0)
+- `amount_in: u64` — Amount of input token to swap
+- `minimum_amount_out: u64` — Minimum output (slippage protection, Meteora reverts if not met)
+
+**Accounts (SwapViaRelay):**
+- `payer` — Authority (must match `vault.authority`)
+- `vault` — VaultAccount PDA
+- `relay_pda` — Relay PDA (signs the Meteora swap CPI)
+- `pool_authority` — Meteora pool authority
+- `pool` — Meteora pool account
+- `input_token_account` — Relay's input token account
+- `output_token_account` — Relay's output token account
+- `token_a_vault`, `token_b_vault` — Meteora pool token vaults
+- `token_a_mint`, `token_b_mint` — Token mints
+- `token_a_program`, `token_b_program` — Token programs
+- `event_authority` — Meteora event authority PDA
+- `amm_program` — Meteora DAMM v2 program ID
+
+**Swap direction** is determined by which relay token account is passed as `input_token_account` vs `output_token_account`. To swap SOL→ZDC, pass WSOL account as input and ZDC account as output. To swap ZDC→SOL, reverse them.
 
 ## Encrypted State (what Arcium MPC stores)
 
@@ -231,6 +267,7 @@ Never use `anchor build`, `cargo build`, or `solana program deploy` directly.
 | `tests/zodiac-mixer.ts` | 25 mixer tests — reference for how to call mixer instructions |
 | `tests/zodiac-mpc-meteora-integration.ts` | 37 integration tests — reference for full privacy flow |
 | `tests/zodiac-full-privacy-integration.ts` | 39 tests — mixer + MPC + Meteora combined |
+| `tests/zodiac-swap.ts` | 4 swap tests — swap_via_relay against existing devnet infrastructure |
 
 ## Arcium v0.7.0 Upgrade History
 
