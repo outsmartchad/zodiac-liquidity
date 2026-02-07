@@ -8,7 +8,7 @@
 | Program | Address |
 |---------|---------|
 | **zodiac_mixer** | `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` |
-| **zodiac_liquidity** | `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5` |
+| **zodiac_liquidity** | `DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty` |
 | **Meteora DAMM v2** | `cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` |
 
 ## Test Status
@@ -308,12 +308,42 @@ arcium mxe-info <program-id> --rpc-url devnet
 
 **Root cause:** `arcium deploy` bundles program deploy + MXE init. `InitMxePart2` creates a LUT using a recent slot, but the slot goes stale during the long program deploy. When the LUT creation fails, keygen never starts, and `Authority` stays `None` forever.
 
-**This is how we got the current program ID** (`4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`). The previous ID (`77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`) had a stuck MXE. We deployed fresh and it worked on the first shot.
+**This is how we got program ID `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`** (now closed). The previous ID (`77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`) had a stuck MXE. We deployed fresh and it worked on the first shot.
+
+### MXE Breaks After Program Binary Upgrade (2026-02-07)
+
+**Problem:** After deploying the `swap_via_relay` instruction to devnet (upgrading the program binary), all MPC computations started timing out. Computations were queued successfully and confirmed on-chain, but ARX node callbacks never arrived. The program binary was updated but the MXE wasn't re-initialized properly.
+
+**How to diagnose:**
+- Computations queue successfully (tx confirmed) but never finalize (timeout after 90s)
+- `arcium mxe-info` shows keys are set (Authority is not None) — misleading, keys are stale
+- Mempool and execpool are empty (ARX nodes pick up computations but can't process them)
+- Circuit URLs and hashes all valid
+
+**What we tried (on old program `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`):**
+1. `arcium deploy --skip-init` — redeployed binary + uploaded IDL, didn't fix MPC
+2. `arcium finalize-mxe-keys` — tx succeeded but didn't fix computations
+3. `arcium deploy` (full) — MXE init failed with "account already in use"
+4. `arcium requeue-mxe-keygen` — failed with "MxeKeysAlreadySet"
+
+**Fix (nuclear option — deploy to fresh program ID):**
+1. Generate new keypair: `solana-keygen new -o target/deploy/zodiac_liquidity-keypair.json`
+2. Update `declare_id!` in `lib.rs` + all sections in `Anchor.toml`
+3. `arcium build --skip-keys-sync`
+4. `arcium deploy --cluster-offset 456 --recovery-set-size 4 --keypair-path ... --rpc-url devnet --program-keypair ... --program-name zodiac_liquidity`
+5. **Critical:** `arcium finalize-mxe-keys <new-program-id> --cluster-offset 456 --keypair-path ... --rpc-url devnet` — MXE keygen on devnet doesn't complete on its own, must be forced
+6. Update program ID in: operator `.env` + IDL + constants, app `.env.production` + `position.ts`, all CLAUDE.md files, onchain scripts
+7. Fund new relay PDA with 0.1 SOL (for Meteora position rent)
+8. Restart all services via PM2
+
+**This is how we got the current program ID** (`DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty`). The previous ID (`4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`) had a stuck MXE after a binary upgrade. All 37 integration tests pass on the new ID.
+
+**Lesson:** Never upgrade a program binary with `solana program deploy` or `anchor deploy`. Always use `arcium deploy` + `arcium finalize-mxe-keys`. If the MXE is stuck, the only reliable fix is deploying to a fresh program ID.
 
 ### Closed Program IDs (do NOT reuse)
 
 These were all previous deploys that were closed to reclaim SOL:
-`5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`, `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`, `Cwrhs9ch9kQBzcDXr1qajxwap5oZXrZBuZADK8vzS46U`, `77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`
+`5iaJJzwRVTT47WLArixF8YoNJFMfLi8PTTmPRi9bdRGu`, `FMMVCEygM2ewq4y4fmE5UDuyfhuoz4bXmEDDeg9iFPpL`, `DjZRUPKc6mafw8EL1zNufkkJLGmFjfxx9ujdp823dmmM`, `7qpT6gRLFm1F9kHLSkHpcMPM6sbdWRNokQaqae1Zz3j2`, `Cwrhs9ch9kQBzcDXr1qajxwap5oZXrZBuZADK8vzS46U`, `77AR99icdjFkosQJkaDePemGKDATPJjy4ZS4AKw5pbN6`, `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`
 
 ## Tech Stack
 
