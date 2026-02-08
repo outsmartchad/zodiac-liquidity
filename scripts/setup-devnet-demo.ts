@@ -310,7 +310,7 @@ async function main() {
   console.log(`WS_URL=${rpcUrl.replace("https://", "wss://")}`);
   console.log(`AUTHORITY_KEYPAIR_PATH=${keypairPath}`);
   console.log(`VAULT_MINT=${baseMint.toString()}`);
-  console.log(`LIQUIDITY_PROGRAM_ID=4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5`);
+  console.log(`LIQUIDITY_PROGRAM_ID=DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty`);
   console.log(`MIXER_PROGRAM_ID=AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb`);
   console.log(`PORT=3001`);
   console.log("");

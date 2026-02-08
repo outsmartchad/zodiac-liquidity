@@ -95,7 +95,7 @@ See `Anchor.toml` and operator/relayer config for current IDs.
 
 | Program | Network | Program ID |
 |---------|---------|-----------|
-| zodiac_liquidity | Devnet | `4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5` |
+| zodiac_liquidity | Devnet | `DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty` |
 | zodiac_mixer | Devnet | `AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb` |
 
 ## Test Status

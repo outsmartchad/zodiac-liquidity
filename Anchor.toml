@@ -7,17 +7,17 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-zodiac_liquidity = "4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5"
+zodiac_liquidity = "DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty"
 zodiac_mixer = "AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb"
 
 [programs.localnet]
-zodiac_liquidity = "4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5"
+zodiac_liquidity = "DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty"
 zodiac_mixer = "AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb"
 
 # Mainnet program IDs — update these after mainnet deployment with the actual deployed addresses.
 # Use `solana-keygen pubkey target/deploy/<program>-keypair.json` to get the address from the keypair.
 [programs.mainnet]
-zodiac_liquidity = "4xNVpFyVTdsFPJ1UoZy9922xh2tDs1URMuujkfYYhHv5"
+zodiac_liquidity = "DxcbU1qqaGf35Wu6EBP3aj3AHYdVRZVyux6xZKRhCty"
 zodiac_mixer = "AjsXjQ7aoXGx3TFioFaHJrYGQVspPFdv4YNVPbkqrbkb"
 
 [registry]
